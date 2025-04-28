@@ -1,55 +1,54 @@
 // --- START OF FILE background.js ---
-console.log("Background script loaded.");
+console.log("Background script loaded. Waiting for messages.");
 
-// Listen for messages from the popup
+// Listen for messages from other parts of the extension (popup or content scripts)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("Background received message:", message);
+  // Log EVERY message received
+  console.log("Background received message:", message, "from sender:", sender);
 
-  if (message.action === 'captureCode') {
-    console.log("Capture code action triggered.");
-    // Get the currently active tab
+  // --- Handler for direct sending from content script (automatic capture) ---
+  if (message.action === 'sendCodeDirectly' && message.code) {
+      console.log("Action 'sendCodeDirectly' received with code. Calling sendCodeToServer."); // <<< CONFIRM THIS LOG APPEARS
+      sendCodeToServer(message.code);
+      return false; // Indicate that we will not be sending an asynchronous response
+  }
+  // --- Handler for the original trigger from popup (manual capture) ---
+  else if (message.action === 'captureCode') {
+    console.log("Manual 'captureCode' action triggered via popup.");
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs.length === 0) {
-        console.error("No active tab found.");
+        console.error("No active tab found for manual capture.");
         return;
       }
       const activeTabId = tabs[0].id;
-      console.log(`Sending message to content script on tab ${activeTabId}`);
-
-      // Send a message to the content script in the active tab
+      console.log(`Sending 'getCodeFromPage' message to content script on tab ${activeTabId}`);
       chrome.tabs.sendMessage(
         activeTabId,
         { action: 'getCodeFromPage' },
         (response) => {
-          // This callback handles the response from the content script
           if (chrome.runtime.lastError) {
-            // Handle errors, e.g., content script not injected or couldn't connect
-            console.error("Error sending message to content script:", chrome.runtime.lastError.message);
-            // Optionally notify the user
-            // chrome.notifications.create({ type: 'basic', iconUrl: 'icon.png', title: 'Error', message: 'Could not connect to page content.' });
+            console.error("Error sending/receiving message for manual capture:", chrome.runtime.lastError.message);
             return;
           }
-
           if (response && response.code) {
-            console.log("Received code from content script:", response.code.substring(0, 100) + "..."); // Log first 100 chars
+            console.log("Received code manually from content script:", response.code.substring(0, 100) + "...");
             sendCodeToServer(response.code);
           } else {
-            console.error("No code received from content script or response was invalid:", response);
-             // Optionally notify the user
-            // chrome.notifications.create({ type: 'basic', iconUrl: 'icon.png', title: 'Error', message: 'Could not find code on the page.' });
+            console.error("No code received from content script for manual capture, or response invalid:", response);
           }
         }
       );
     });
-    // Return true to indicate you wish to send a response asynchronously
-    // (although we handle the response in the chrome.tabs.sendMessage callback here)
-    return true;
+    return true; // Async response expected later
+  } else {
+      console.log("Received message action is not 'sendCodeDirectly' or 'captureCode'. Action:", message.action);
   }
 });
 
+// --- Function to send the captured code to the local Flask server ---
 async function sendCodeToServer(code) {
-  const url = 'http://localhost:5000/submit_code';
-  console.log(`Sending code to server at ${url}`);
+  const url = 'http://localhost:5000/submit_code'; // Or 127.0.0.1:5000
+  console.log(`Attempting to send code to server at ${url}`); // <<< CONFIRM THIS LOG APPEARS
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -59,19 +58,21 @@ async function sendCodeToServer(code) {
       body: JSON.stringify({ code: code }),
     });
 
-    const result = await response.json();
-    console.log("Server response:", result);
+    console.log(`Fetch response status: ${response.status}`); // <<< LOG STATUS CODE
+    const result = await response.json(); // Try to parse JSON regardless of status for more info
+    console.log("Server response received:", result); // <<< CONFIRM THIS LOG APPEARS
 
-    // Optional: Notify user of success/failure
-    // const message = result.status === 'success'
-    //   ? `Code saved as ${result.saved_as}. Syntax OK: ${result.syntax_ok}. Log: ${result.log_file || 'N/A'}`
-    //   : `Server Error: ${result.message || 'Unknown error'}`;
-    // chrome.notifications.create({ type: 'basic', iconUrl: 'icon.png', title: 'AI Code Capture', message: message });
+    if (!response.ok) {
+        console.error(`Server responded with non-OK status: ${response.status}`);
+        // Handle server-side error reporting if needed
+    }
 
   } catch (error) {
-    console.error('Error sending code to server:', error);
-     // Optional: Notify user of network error
-    // chrome.notifications.create({ type: 'basic', iconUrl: 'icon.png', title: 'Network Error', message: `Failed to connect to server: ${error.message}` });
+    // <<< CRITICAL: CHECK FOR THIS ERROR LOG >>>
+    console.error('!!! Network error or issue sending code to server:', error);
+    // Possible reasons: Server not running, connection refused, CORS (unlikely for localhost), network config issue.
   }
 }
+
+console.log("Background script finished loading.");
 // --- END OF FILE background.js ---
