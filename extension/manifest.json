@@ -5,14 +5,15 @@
   "version": "1.0",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "background": {
     "scripts": ["background.js"]
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["https://aistudio.google.com/*"],
       "js": ["content.js"],
       "css": ["highlight.css"]
     }

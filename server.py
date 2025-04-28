@@ -1,3 +1,4 @@
+# server.py
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 import os
 import datetime
@@ -15,77 +16,78 @@ os.makedirs(LOG_FOLDER, exist_ok=True)
 
 # --- Regex to EXTRACT filename FROM START MARKER ---
 # Captures filename in group 1. Looks at the beginning of the string.
-FILENAME_EXTRACT_REGEX = re.compile(r"^\s*// --- START OF FILE (.+?) ---\s*\n", re.IGNORECASE)
+# Allows various comment styles (#, //, /*, --) or no comment leader
+FILENAME_EXTRACT_REGEX = re.compile(
+    r"^\s*(?://|#|--|\*)\s*--- START OF FILE (.+?) ---\s*\n",
+    re.IGNORECASE
+)
 
-# --- Filename Sanitization (copied from previous version) ---
+# --- Filename Sanitization ---
 FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._-]')
 MAX_FILENAME_LENGTH = 100
 
 def sanitize_filename(filename: str) -> str | None:
-    """Cleans a filename extracted from the code or provided by the client."""
+    """
+    Cleans a filename extracted from the code marker.
+    - Removes directory components.
+    - Rejects filenames starting with '.' (hidden files).
+    - Replaces unsafe characters with underscores.
+    - Enforces max length.
+    - Returns the sanitized filename or None if it's fundamentally invalid.
+    (Extension is preserved from the original marker)
+    """
     if not filename or filename.isspace():
         return None
-    if '..' in filename or filename.startswith('/'):
+
+    # Basic check for directory traversal attempts before basename
+    if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
         print(f"Warning: Rejected potentially unsafe filename pattern: {filename}", file=sys.stderr)
         return None
+
+    # Get only the filename part, removing any directory paths
     filename = os.path.basename(filename)
+
+    # Reject hidden files or invalid starting characters
     if filename.startswith('.'):
         print(f"Warning: Rejected filename starting with '.': {filename}", file=sys.stderr)
         return None
+
+    # Replace potentially unsafe characters with underscores
     sanitized = FILENAME_SANITIZE_REGEX.sub('_', filename)
+
+    # Enforce maximum length
     if len(sanitized) > MAX_FILENAME_LENGTH:
         base, ext = os.path.splitext(sanitized)
-        base = base[:MAX_FILENAME_LENGTH - len(ext) - 1]
+        if len(ext) > (MAX_FILENAME_LENGTH - 2): # Prevent huge extension from breaking logic
+             ext = ext[:MAX_FILENAME_LENGTH - 2] + "~" # Truncate extension too if needed
+        base = base[:MAX_FILENAME_LENGTH - len(ext) - 1] # Truncate base part
         sanitized = f"{base}{ext}"
-    # Ensure it ends with a common code extension if not already present - adjust as needed
-    # This is less critical here as we primarily use it for git lookup
-    # if not any(sanitized.endswith(ext) for ext in ['.py', '.js', '.html', '.css', '.json', '.md', '.txt']):
-    #      # Avoid adding extension if base name is empty
-    #      if not os.path.splitext(sanitized)[0]:
-    #          return None
-    #      # Default or decide based on content? For now, just keep as is or add .txt?
-    #      # sanitized += ".txt" # Example default
-    #      pass # Let's allow other extensions found in marker for now
-    if not os.path.splitext(sanitized)[0]:
+
+    # Final check for empty name after sanitization (e.g., input was just unsafe chars)
+    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1: # Allow just extension like '.gitignore'
          return None
+
     return sanitized
 
-# --- Git Content Fetching (copied from previous version) ---
-def get_git_committed_content(filename_relative: str) -> str | None:
-    """Retrieves the content of a file from the HEAD commit using git show."""
-    # Use relative path for git show command
-    # Ensure forward slashes for git compatibility
-    filepath_git = Path(filename_relative).as_posix()
 
-    command = ['git', 'show', f'HEAD:{filepath_git}']
-    print(f"Running git command: {' '.join(command)}", file=sys.stderr)
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            check=False
-        )
-        if result.returncode != 0:
-            print(f"Info: git show failed for '{filepath_git}' (return code {result.returncode}). Maybe file not committed or path differs?", file=sys.stderr)
-            # print(result.stderr, file=sys.stderr) # Optional: show git error
-            return None
-        print(f"Successfully fetched content for '{filepath_git}' from HEAD.", file=sys.stderr)
-        return result.stdout
-    except FileNotFoundError:
-        print("Error: 'git' command not found. Is Git installed and in your PATH?", file=sys.stderr)
-        return None
-    except Exception as e:
-        print(f"Error running git show for '{filepath_git}': {e}", file=sys.stderr)
-        return None
+def find_unique_filepath(suggested_filename: str) -> str:
+    """
+    Takes a sanitized suggested filename and finds a unique path in SAVE_FOLDER,
+    appending _1, _2, etc., if necessary to avoid collisions.
+    """
+    base, ext = os.path.splitext(suggested_filename)
+    counter = 1
+    filepath = Path(SAVE_FOLDER) / suggested_filename # Use Path object
+
+    while filepath.exists():
+        filename = f"{base}_{counter}{ext}"
+        filepath = Path(SAVE_FOLDER) / filename
+        counter += 1
+    return str(filepath) # Return as string
 
 
-AUTO_RUN_ON_SYNTAX_OK = True # Original setting
-
-# --- Original Filename Generation (used for SAVING) ---
-def generate_timestamped_filepath():
-    """Generates a unique filepath based on timestamp."""
+def generate_timestamped_py_filepath():
+    """Generates a unique python filepath based on timestamp (Fallback)."""
     today = datetime.datetime.now().strftime("%Y%m%d")
     counter = 1
     while True:
@@ -95,10 +97,11 @@ def generate_timestamped_filepath():
             return filepath # Return the full path
         counter += 1
 
-# --- Original Script Runner ---
+AUTO_RUN_ON_SYNTAX_OK = True # Original setting
+
 def run_script(filepath):
     """Runs the python script and captures output."""
-    filename_base = os.path.splitext(os.path.basename(filepath))[0]
+    filename_base = Path(filepath).stem # Use pathlib for cleaner base name
     logpath = os.path.join(LOG_FOLDER, f"{filename_base}.log")
 
     try:
@@ -111,21 +114,23 @@ def run_script(filepath):
             encoding='utf-8',
             check=False
         )
+        os.makedirs(LOG_FOLDER, exist_ok=True) # Ensure log folder exists
         with open(logpath, 'w', encoding='utf-8') as f:
             f.write(f"--- STDOUT ---\n{result.stdout}\n")
             f.write(f"--- STDERR ---\n{result.stderr}\n")
             f.write(f"--- Return Code: {result.returncode} ---\n")
         return result.returncode == 0, logpath
     except subprocess.TimeoutExpired:
+        os.makedirs(LOG_FOLDER, exist_ok=True)
         with open(logpath, 'w', encoding='utf-8') as f:
             f.write("Error: Script timed out after 10 seconds.\n")
         return False, logpath
     except Exception as e:
+        os.makedirs(LOG_FOLDER, exist_ok=True)
         with open(logpath, 'w', encoding='utf-8') as f:
             f.write(f"Error running script: {str(e)}\n")
         return False, logpath
 
-# --- Modified Submit Route ---
 @app.route('/submit_code', methods=['POST'])
 def submit_code():
     data = request.get_json()
@@ -133,121 +138,123 @@ def submit_code():
         print("Error: No JSON data received.", file=sys.stderr)
         return jsonify({'status': 'error', 'message': 'No JSON data received'}), 400
 
-    original_code = data.get('code', '') # Get the code sent by the extension
+    received_code = data.get('code', '')
 
-    if not original_code or original_code.isspace():
+    if not received_code or received_code.isspace():
         print("Error: Empty code received.", file=sys.stderr)
         return jsonify({'status': 'error', 'message': 'Empty code received'}), 400
 
-    code_to_save = original_code # Start with the original code
-    extracted_filename = None
+    save_filepath = None
+    final_save_filename = None
+    extracted_filename_raw = None
+    is_likely_python = False # Default to false unless determined otherwise
 
-    # --- Try to extract filename and replace code from Git ---
-    match = FILENAME_EXTRACT_REGEX.search(original_code)
+    # --- Determine filename and type ---
+    match = FILENAME_EXTRACT_REGEX.search(received_code)
     if match:
-        raw_filename = match.group(1).strip()
-        print(f"Found filename marker: '{raw_filename}'", file=sys.stderr)
-        extracted_filename = sanitize_filename(raw_filename) # Sanitize before use
+        extracted_filename_raw = match.group(1).strip()
+        print(f"Found filename marker: '{extracted_filename_raw}'", file=sys.stderr)
+        sanitized = sanitize_filename(extracted_filename_raw)
 
-        if extracted_filename:
-            print(f"Sanitized filename for Git lookup: '{extracted_filename}'", file=sys.stderr)
-            # Attempt to fetch content from Git HEAD based on the sanitized name
-            git_content = get_git_committed_content(extracted_filename)
-            if git_content is not None:
-                print(f"Replacing received code with Git HEAD version of '{extracted_filename}'.", file=sys.stderr)
-                # IMPORTANT: Replace the code content we intend to save and run
-                code_to_save = git_content
-                # Optional: Remove the start/end markers if they exist in git_content?
-                # git_content = remove_markers(git_content) # Need a function for this if desired
-            else:
-                print(f"Warning: Could not get Git content for '{extracted_filename}'. Using code as received.", file=sys.stderr)
-                # code_to_save remains original_code
-                # Optionally, strip the marker from original_code if needed?
-                # code_to_save = original_code[match.end():] # Example: strip marker if git fails
+        if sanitized:
+            print(f"Sanitized filename: '{sanitized}'", file=sys.stderr)
+            save_filepath = find_unique_filepath(sanitized) # Handles collisions
+            final_save_filename = os.path.basename(save_filepath)
+            # Check if the FINAL saved filename ends with .py
+            is_likely_python = final_save_filename.lower().endswith('.py')
+            print(f"Using unique filepath: '{save_filepath}', is_python: {is_likely_python}", file=sys.stderr)
         else:
-            print(f"Warning: Extracted filename '{raw_filename}' was invalid after sanitization. Using code as received.", file=sys.stderr)
-            # code_to_save remains original_code
+            print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Falling back to timestamped Python name.", file=sys.stderr)
+            save_filepath = generate_timestamped_py_filepath()
+            final_save_filename = os.path.basename(save_filepath)
+            is_likely_python = True # Fallback assumes Python
+            print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
     else:
-        print("Info: No filename marker found at start of received code. Using code as received.", file=sys.stderr)
-        # code_to_save remains original_code
+        print("Info: No filename marker found. Saving as timestamped Python file.", file=sys.stderr)
+        save_filepath = generate_timestamped_py_filepath()
+        final_save_filename = os.path.basename(save_filepath)
+        is_likely_python = True # Fallback assumes Python
+        print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
 
-    # --- Generate SAVING filepath (always timestamped in this version) ---
-    save_filepath = generate_timestamped_filepath()
-    save_filename = os.path.basename(save_filepath)
-    print(f"Generated filepath for saving: '{save_filepath}'", file=sys.stderr)
 
-    # --- Save the final code (original or from Git) ---
+    # --- Save the received code ---
     try:
         os.makedirs(SAVE_FOLDER, exist_ok=True)
         with open(save_filepath, 'w', encoding='utf-8') as f:
-            f.write(code_to_save) # Write the potentially modified code
+            # Save the original code as received, including markers if present
+            f.write(received_code)
         print(f"Code saved successfully to {save_filepath}", file=sys.stderr)
     except Exception as e:
-        print(f"Error: Failed to save file '{save_filepath}': {str(e)}", file=sys.stderr)
-        return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
+         print(f"Error: Failed to save file '{save_filepath}': {str(e)}", file=sys.stderr)
+         return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
 
-    # --- Check Syntax and Optionally Run (using the saved file) ---
-    syntax_ok = False
+
+    # --- Check Syntax and Optionally Run ONLY if it's a Python file ---
+    syntax_ok = None # Use None to indicate check wasn't performed
     run_success = None
-    logpath = None
     log_filename = None
 
-    try:
-        compile(code_to_save, save_filepath, 'exec') # Compile the code we saved
-        syntax_ok = True
-        print(f"Syntax OK for {save_filename}", file=sys.stderr)
-        if AUTO_RUN_ON_SYNTAX_OK:
-            print(f"Attempting to run {save_filename}", file=sys.stderr)
-            run_success, logpath = run_script(save_filepath) # Run the saved file
-            log_filename = os.path.basename(logpath) if logpath else None
-            print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
-
-    except SyntaxError as e:
-        syntax_ok = False
-        print(f"Syntax Error in {save_filename}: Line {e.lineno}, Offset: {e.offset}, Message: {e.msg}", file=sys.stderr)
-        log_filename_base = os.path.splitext(save_filename)[0]
-        logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_syntax_error.log")
+    if is_likely_python:
+        print(f"File '{final_save_filename}' is Python, performing checks.", file=sys.stderr)
         try:
-            os.makedirs(LOG_FOLDER, exist_ok=True)
-            with open(logpath_err, 'w', encoding='utf-8') as f:
-                 f.write(f"Syntax Error:\nFile: {save_filename} (Original Marker: {raw_filename if match else 'None'})\nLine: {e.lineno}, Offset: {e.offset}\nMessage: {e.msg}\nCode Context:\n{e.text}")
-            log_filename = os.path.basename(logpath_err)
-        except Exception as log_e:
-             print(f"Error writing syntax error log for {save_filename}: {log_e}", file=sys.stderr)
+            # Compile the received code (markers shouldn't affect syntax check itself if comments)
+            compile(received_code, save_filepath, 'exec')
+            syntax_ok = True
+            print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
+            if AUTO_RUN_ON_SYNTAX_OK:
+                print(f"Attempting to run {final_save_filename}", file=sys.stderr)
+                run_success, logpath = run_script(save_filepath) # Run the saved file
+                log_filename = os.path.basename(logpath) if logpath else None
+                print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
 
-    except Exception as compile_e:
-        syntax_ok = False
-        run_success = False
-        print(f"Error during compile/run setup for {save_filename}: {str(compile_e)}", file=sys.stderr)
-        log_filename_base = os.path.splitext(save_filename)[0]
-        logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_compile_error.log")
-        try:
-             os.makedirs(LOG_FOLDER, exist_ok=True)
-             with open(logpath_err, 'w', encoding='utf-8') as f:
-                 f.write(f"Error during compile/run setup:\nFile: {save_filename} (Original Marker: {raw_filename if match else 'None'})\nError: {str(compile_e)}\n")
-             log_filename = os.path.basename(logpath_err)
-        except Exception as log_e:
-             print(f"Error writing compile error log for {save_filename}: {log_e}", file=sys.stderr)
+        except SyntaxError as e:
+            syntax_ok = False # Syntax definitely failed
+            print(f"Syntax Error in {final_save_filename}: Line {e.lineno}, Offset: {e.offset}, Message: {e.msg}", file=sys.stderr)
+            log_filename_base = Path(save_filepath).stem
+            logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_syntax_error.log")
+            try:
+                os.makedirs(LOG_FOLDER, exist_ok=True)
+                with open(logpath_err, 'w', encoding='utf-8') as f:
+                     f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nLine: {e.lineno}, Offset: {e.offset}\nMessage: {e.msg}\nCode Context:\n{e.text}")
+                log_filename = os.path.basename(logpath_err)
+            except Exception as log_e:
+                 print(f"Error writing syntax error log for {final_save_filename}: {log_e}", file=sys.stderr)
+
+        except Exception as compile_e:
+            syntax_ok = False # Treat other compile errors as syntax failure
+            run_success = False
+            print(f"Error during compile/run setup for {final_save_filename}: {str(compile_e)}", file=sys.stderr)
+            log_filename_base = Path(save_filepath).stem
+            logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_compile_error.log")
+            try:
+                 os.makedirs(LOG_FOLDER, exist_ok=True)
+                 with open(logpath_err, 'w', encoding='utf-8') as f:
+                     f.write(f"Error during compile/run setup:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nError: {str(compile_e)}\n")
+                 log_filename = os.path.basename(logpath_err)
+            except Exception as log_e:
+                 print(f"Error writing compile error log for {final_save_filename}: {log_e}", file=sys.stderr)
+    else:
+        print(f"File '{final_save_filename}' is not Python, skipping syntax check and run.", file=sys.stderr)
+        # syntax_ok and run_success remain None
+
 
     # --- Return Response ---
     response_data = {
         'status': 'success',
-        'syntax_ok': syntax_ok,
-        'saved_as': save_filename, # Report the timestamped name it was saved as
+        'saved_as': final_save_filename,
         'log_file': log_filename,
-        'source_file_marker': raw_filename if match else None, # Indicate if marker was found
-        'used_git_content': (git_content is not None) if match and extracted_filename else False # Indicate if git content replaced original
+        'syntax_ok': syntax_ok, # Will be True, False, or None
+        'run_success': run_success, # Will be True, False, or None
+        'source_file_marker': extracted_filename_raw # Include the raw marker filename found
     }
-    if run_success is not None:
-        response_data['run_success'] = run_success
 
     print(f"Sending response: {response_data}", file=sys.stderr)
     return jsonify(response_data)
 
-# --- Original Log Routes ---
+
+# --- Log Routes (Keep improved versions) ---
 @app.route('/logs')
 def list_logs():
-    # (Keep the improved version from the previous iteration)
     log_files = []
     try:
          log_dir = os.path.abspath(LOG_FOLDER)
@@ -281,7 +288,7 @@ def list_logs():
       {% if logs %}
       <ul>
         {% for log in logs %}
-          <li><a href="/logs/{{ log | urlencode }}">{{ log }}</a></li>
+          <li><a href="/logs/{{ log | urlencode }}">{{ log }}</a></li> {# Ensure filename is URL encoded #}
         {% endfor %}
       </ul>
       {% else %}
@@ -294,7 +301,6 @@ def list_logs():
 
 @app.route('/logs/<path:filename>')
 def serve_log(filename):
-    # (Keep the improved version from the previous iteration)
     print(f"Request received for log file: {filename}", file=sys.stderr)
     log_dir = os.path.abspath(LOG_FOLDER)
     requested_path = os.path.abspath(os.path.join(log_dir, filename))
@@ -315,5 +321,7 @@ if __name__ == '__main__':
     host_ip = '127.0.0.1'
     port_num = 5000
     print(f"Starting Flask server on http://{host_ip}:{port_num}", file=sys.stderr)
-    print("Server will attempt to replace received code with Git HEAD version if start marker is found.", file=sys.stderr)
+    print(f"Saving received files to: {Path(SAVE_FOLDER).resolve()}", file=sys.stderr)
+    print(f"Saving logs to: {Path(LOG_FOLDER).resolve()}", file=sys.stderr)
+    print("Will use filename from start marker if present and valid.", file=sys.stderr)
     app.run(host=host_ip, port=port_num, debug=False)
