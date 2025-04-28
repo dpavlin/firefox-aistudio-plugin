@@ -1,110 +1,157 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
-import os
-import datetime
+import re
 import subprocess
+import sys
+import argparse
+from pathlib import Path
 
-app = Flask(__name__)
+# --- Regex to find the file blocks ---
+# It captures:
+# Group 1: The filename
+# Group 2: The content between START and END markers
+# It requires the re.DOTALL flag so '.' matches newlines.
+# It also requires the backreference \1 in the END marker to match the filename.
+FILE_BLOCK_REGEX = re.compile(
+    r"^(// --- START OF FILE (.+?) ---$).*?^(// --- END OF FILE \2 ---$)",
+    re.MULTILINE | re.DOTALL
+)
 
-SAVE_FOLDER = 'received_codes'
-LOG_FOLDER = 'logs'
-os.makedirs(SAVE_FOLDER, exist_ok=True)
-os.makedirs(LOG_FOLDER, exist_ok=True)
+# --- Markers ---
+# Ensure these match exactly what's in your file (including spaces/slashes)
+START_MARKER_FORMAT = "// --- START OF FILE {} ---"
+END_MARKER_FORMAT = "// --- END OF FILE {} ---"
 
-AUTO_RUN_ON_SYNTAX_OK = True
+def get_git_committed_content(filepath: Path) -> str | None:
+    """
+    Retrieves the content of a file from the HEAD commit using git show.
 
-def generate_filename():
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    counter = 1
-    while True:
-        filename = f"python_code_{today}_{counter:03d}.py"
-        filepath = os.path.join(SAVE_FOLDER, filename)
-        if not os.path.exists(filepath):
-            return filepath
-        counter += 1
+    Args:
+        filepath: Path object representing the file.
 
-def run_script(filepath):
-    filename_base = os.path.splitext(os.path.basename(filepath))[0]
-    logpath = os.path.join(LOG_FOLDER, f"{filename_base}.log")
+    Returns:
+        The file content as a string if successful, None otherwise.
+    """
+    if not filepath.is_file():
+        print(f"Warning: Local file not found: {filepath}", file=sys.stderr)
+        # Decide if you want to proceed without a local file check
+        # return None # Or continue to try git show
+
+    # Use relative path for git show command
+    relative_filepath = filepath.as_posix() # Use forward slashes for git
+
+    command = ['git', 'show', f'HEAD:{relative_filepath}']
+    print(f"Running git command: {' '.join(command)}", file=sys.stderr)
 
     try:
         result = subprocess.run(
-            ['python', filepath],
+            command,
             capture_output=True,
             text=True,
-            timeout=10
+            encoding='utf-8',
+            check=False  # Don't raise exception on non-zero exit
         )
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write(f"--- STDOUT ---\n{result.stdout}\n")
-            f.write(f"--- STDERR ---\n{result.stderr}\n")
-        return True, logpath
-    except subprocess.TimeoutExpired:
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write("Error: Script timed out after 10 seconds.\n")
-        return False, logpath
+
+        if result.returncode != 0:
+            print(f"Error: git show failed for '{relative_filepath}' (return code {result.returncode}):", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            return None
+        
+        print(f"Successfully fetched content for '{relative_filepath}' from HEAD.", file=sys.stderr)
+        return result.stdout
+
+    except FileNotFoundError:
+        print("Error: 'git' command not found. Is Git installed and in your PATH?", file=sys.stderr)
+        return None
     except Exception as e:
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write(f"Error running script: {str(e)}\n")
-        return False, logpath
+        print(f"Error running git show for '{relative_filepath}': {e}", file=sys.stderr)
+        return None
 
-@app.route('/submit_code', methods=['POST'])
-def submit_code():
-    data = request.get_json()
-    code = data.get('code', '')
+def replacement_callback(match: re.Match) -> str:
+    """
+    Callback function for re.sub. Attempts to replace the matched block
+    with the Git-committed version of the file.
+    """
+    original_block = match.group(0)
+    start_marker_line = match.group(1) # Full start marker line
+    filename = match.group(2).strip()    # Captured filename, stripped
+    end_marker_line = match.group(3)   # Full end marker line
 
-    if not code.strip():
-        return jsonify({'status': 'error', 'message': 'Empty code received'}), 400
+    print(f"Found block for file: '{filename}'", file=sys.stderr)
 
-    filepath = generate_filename()
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(code)
+    filepath = Path(filename).resolve() # Resolve to absolute path based on CWD
+
+    git_content = get_git_committed_content(filepath)
+
+    if git_content is not None:
+        # Ensure git content doesn't have trailing newline issues if not desired
+        # git_content = git_content.rstrip('\n')
+
+        # Reconstruct the block with new content
+        new_block = f"{start_marker_line}\n{git_content}\n{end_marker_line}"
+        print(f"Replacing block for '{filename}'.", file=sys.stderr)
+        return new_block
+    else:
+        # If fetching from Git failed, return the original block unchanged
+        print(f"Warning: Could not get Git content for '{filename}'. Keeping original block.", file=sys.stderr)
+        return original_block
+
+def process_file(input_path: Path, output_path: Path):
+    """Reads input file, processes content, and writes to output file."""
+    print(f"Processing input file: {input_path}", file=sys.stderr)
+    try:
+        original_text = input_path.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        print(f"Error: Input file not found: {input_path}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading input file {input_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Perform the replacements using the callback
+    modified_text = FILE_BLOCK_REGEX.sub(replacement_callback, original_text)
 
     try:
-        compile(code, filepath, 'exec')
-        syntax_ok = True
-    except SyntaxError:
-        syntax_ok = False
+        output_path.write_text(modified_text, encoding='utf-8')
+        print(f"Successfully wrote modified content to: {output_path}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error writing output file {output_path}: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    logpath = None
-    if syntax_ok and AUTO_RUN_ON_SYNTAX_OK:
-        _, logpath = run_script(filepath)
+def main():
+    parser = argparse.ArgumentParser(
+        description="Replaces marked file blocks in an input file with their last Git-committed versions."
+    )
+    parser.add_argument(
+        "input_file",
+        help="Path to the input file containing the marked blocks."
+    )
+    parser.add_argument(
+        "-o", "--output-file",
+        help="Path to the output file. If omitted, overwrites the input file."
+    )
 
-    return jsonify({
-        'status': 'success',
-        'syntax_ok': syntax_ok,
-        'saved_as': os.path.basename(filepath),
-        'log_file': os.path.basename(logpath) if logpath else None
-    })
+    args = parser.parse_args()
 
-@app.route('/logs')
-def list_logs():
-    log_files = sorted(os.listdir(LOG_FOLDER), reverse=True)
-    template = '''
-    <html>
-    <head>
-      <title>Logs Browser</title>
-      <style>
-        body { font-family: Arial, sans-serif; background: #111; color: #eee; padding: 20px; }
-        h1 { color: #00ff99; }
-        a { color: #00ccff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        pre { background: #222; padding: 10px; border-radius: 8px; overflow-x: auto; }
-      </style>
-    </head>
-    <body>
-      <h1>🗂 Available Logs</h1>
-      <ul>
-        {% for log in logs %}
-          <li><a href="/logs/{{ log }}">{{ log }}</a></li>
-        {% endfor %}
-      </ul>
-    </body>
-    </html>
-    '''
-    return render_template_string(template, logs=log_files)
+    input_path = Path(args.input_file).resolve() # Get absolute path
+    
+    if args.output_file:
+        output_path = Path(args.output_file).resolve()
+        # Prevent accidental overwrite if input/output are same via different relative paths
+        if input_path == output_path:
+             print(f"Warning: Input and output paths resolve to the same file ({input_path}). Overwriting.", file=sys.stderr)
+    else:
+        output_path = input_path # Overwrite input if no output specified
+        print(f"Warning: No output file specified. Input file '{input_path}' will be overwritten.", file=sys.stderr)
+        try:
+            # Basic safety prompt for overwriting
+            confirm = input("Are you sure you want to continue? (y/N): ")
+            if confirm.lower() != 'y':
+                print("Operation cancelled.", file=sys.stderr)
+                sys.exit(0)
+        except EOFError: # Handle non-interactive environments
+             print("Warning: Cannot confirm overwrite in non-interactive mode. Proceeding with overwrite.", file=sys.stderr)
 
-@app.route('/logs/<path:filename>')
-def serve_log(filename):
-    return send_from_directory(LOG_FOLDER, filename)
 
-if __name__ == '__main__':
-    app.run(port=5000)
+    process_file(input_path, output_path)
+
+if __name__ == "__main__":
+    main()
