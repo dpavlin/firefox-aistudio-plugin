@@ -1,0 +1,13 @@
+/* highlight.css */
+/* Style for the highlighted code block */
+.aicapture-highlight {
+  /* Use outline to avoid affecting layout, !important might be needed */
+  outline: 3px solid #FFD700 !important; /* Bright yellow/gold outline */
+  outline-offset: 2px; /* Small space between element and outline */
+  background-color: rgba(255, 215, 0, 0.15) !important; /* Faint yellow background */
+  border-radius: 4px; /* Slightly rounded corners */
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6); /* Optional subtle glow */
+
+  /* Smooth transition for removal */
+  transition: outline 0.5s ease-out, background-color 0.5s ease-out, box-shadow 0.5s ease-out;
+}
