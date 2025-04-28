@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>AI Code Capture</title>
+  </head>
+  <body>
+    <h1>AI Code Capture</h1>
+    <button id="sendCodeButton">Send Code to Server</button>
+    <script>
+      document.getElementById('sendCodeButton').addEventListener('click', function() {
+        chrome.runtime.sendMessage({ action: 'captureCode' });
+      });
+    </script>
+  </body>
+</html>

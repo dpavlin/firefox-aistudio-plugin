@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "AI Code Capture",
+  "description": "Capture and run AI-generated Python code snippets.",
+  "version": "1.0",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
