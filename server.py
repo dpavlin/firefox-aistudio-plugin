@@ -26,47 +26,89 @@ FILENAME_EXTRACT_REGEX = re.compile(
 FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._-]')
 MAX_FILENAME_LENGTH = 100
 
+# --- Simple Language Detection Heuristics ---
+# Basic patterns to guess the language. Order can matter slightly.
+# More sophisticated libraries exist (e.g., pygments, guesslang), but add dependencies.
+LANGUAGE_PATTERNS = {
+    '.py': re.compile(r'\b(def|class|import|from|if|else|elif|for|while|try|except|print)\b', re.MULTILINE),
+    '.js': re.compile(r'\b(function|var|let|const|if|else|for|while|document|window|console\.log)\b', re.MULTILINE),
+    '.html': re.compile(r'<(!DOCTYPE html|html|head|body|div|p|a|img|script|style)\b', re.IGNORECASE | re.MULTILINE),
+    '.css': re.compile(r'[{};]\s*([a-zA-Z-]+)\s*:', re.MULTILINE), # Looks for CSS properties
+    '.json': re.compile(r'^\s*\{.*\}\s*$|^\s*\[.*\]\s*$', re.DOTALL), # Basic JSON structure check
+    '.md': re.compile(r'^#+\s|\*\*|\*|_|`|> |-', re.MULTILINE), # Common markdown chars
+    '.sql': re.compile(r'\b(SELECT|INSERT|UPDATE|DELETE|CREATE|TABLE|FROM|WHERE|JOIN)\b', re.IGNORECASE | re.MULTILINE),
+    '.xml': re.compile(r'<(\?xml|!DOCTYPE|[a-zA-Z:]+)', re.MULTILINE),
+    # Add more patterns as needed
+}
+
+DEFAULT_EXTENSION = '.txt' # Fallback if nothing detected
+
+def detect_language_and_extension(code: str) -> tuple[str, str]:
+    """
+    Performs simple heuristic checks to guess the language and return an extension.
+    Returns (detected_extension, detected_language_name).
+    """
+    # Check first few lines for shebang or specific comments
+    first_lines = code.splitlines()[:3]
+    if first_lines:
+        if first_lines[0].startswith('#!/usr/bin/env python') or first_lines[0].startswith('#!/usr/bin/python'):
+            return '.py', 'Python'
+        if first_lines[0].startswith('#!/bin/bash') or first_lines[0].startswith('#!/bin/sh'):
+            return '.sh', 'Shell'
+        if first_lines[0].startswith('<?php'):
+             return '.php', 'PHP'
+
+
+    # Check regex patterns (adjust order if needed)
+    # Prioritize more specific patterns first if there's overlap potential
+    if LANGUAGE_PATTERNS['.html'].search(code):
+        return '.html', 'HTML'
+    if LANGUAGE_PATTERNS['.xml'].search(code):
+         return '.xml', 'XML'
+    if LANGUAGE_PATTERNS['.json'].search(code):
+         # Basic check, might need refinement for single values
+         # Try parsing for more robustness (adds dependency)
+         try:
+            import json
+            json.loads(code)
+            return '.json', 'JSON'
+         except:
+             pass # Not valid JSON, continue checking other patterns
+    if LANGUAGE_PATTERNS['.css'].search(code):
+        return '.css', 'CSS'
+    if LANGUAGE_PATTERNS['.py'].search(code):
+        return '.py', 'Python'
+    if LANGUAGE_PATTERNS['.js'].search(code):
+        return '.js', 'JavaScript'
+    if LANGUAGE_PATTERNS['.sql'].search(code):
+         return '.sql', 'SQL'
+    if LANGUAGE_PATTERNS['.md'].search(code):
+        return '.md', 'Markdown'
+
+    # Fallback
+    print("Warning: Could not reliably detect language. Defaulting to .txt", file=sys.stderr)
+    return DEFAULT_EXTENSION, 'Text'
+
 def sanitize_filename(filename: str) -> str | None:
-    """
-    Cleans a filename extracted from the code marker.
-    - Removes directory components.
-    - Rejects filenames starting with '.' (hidden files).
-    - Replaces unsafe characters with underscores.
-    - Enforces max length.
-    - Returns the sanitized filename or None if it's fundamentally invalid.
-    (Extension is preserved from the original marker)
-    """
+    """Cleans a filename extracted from the code marker."""
     if not filename or filename.isspace():
         return None
-
-    # Basic check for directory traversal attempts before basename
     if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
         print(f"Warning: Rejected potentially unsafe filename pattern: {filename}", file=sys.stderr)
         return None
-
-    # Get only the filename part, removing any directory paths
     filename = os.path.basename(filename)
-
-    # Reject hidden files or invalid starting characters
     if filename.startswith('.'):
         print(f"Warning: Rejected filename starting with '.': {filename}", file=sys.stderr)
         return None
-
-    # Replace potentially unsafe characters with underscores
     sanitized = FILENAME_SANITIZE_REGEX.sub('_', filename)
-
-    # Enforce maximum length
     if len(sanitized) > MAX_FILENAME_LENGTH:
         base, ext = os.path.splitext(sanitized)
-        if len(ext) > (MAX_FILENAME_LENGTH - 2): # Prevent huge extension from breaking logic
-             ext = ext[:MAX_FILENAME_LENGTH - 2] + "~" # Truncate extension too if needed
-        base = base[:MAX_FILENAME_LENGTH - len(ext) - 1] # Truncate base part
+        if len(ext) > (MAX_FILENAME_LENGTH - 2):
+             ext = ext[:MAX_FILENAME_LENGTH - 2] + "~"
+        base = base[:MAX_FILENAME_LENGTH - len(ext) - 1]
         sanitized = f"{base}{ext}"
-
-    # Final check for empty name after sanitization (e.g., input was just unsafe chars)
-    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1: # Allow just extension like '.gitignore'
+    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1:
          return None
-
     return sanitized
 
 
@@ -86,12 +128,16 @@ def find_unique_filepath(suggested_filename: str) -> str:
     return str(filepath) # Return as string
 
 
-def generate_timestamped_py_filepath():
-    """Generates a unique python filepath based on timestamp (Fallback)."""
+def generate_timestamped_filepath(extension: str = '.txt', base_prefix="code"):
+    """Generates a unique filepath based on timestamp with a given extension."""
     today = datetime.datetime.now().strftime("%Y%m%d")
     counter = 1
+    # Ensure extension starts with a dot
+    if not extension.startswith('.'):
+        extension = '.' + extension
+
     while True:
-        filename = f"python_code_{today}_{counter:03d}.py"
+        filename = f"{base_prefix}_{today}_{counter:03d}{extension}"
         filepath = os.path.join(SAVE_FOLDER, filename)
         if not os.path.exists(filepath):
             return filepath # Return the full path
@@ -101,7 +147,7 @@ AUTO_RUN_ON_SYNTAX_OK = True # Original setting
 
 def run_script(filepath):
     """Runs the python script and captures output."""
-    filename_base = Path(filepath).stem # Use pathlib for cleaner base name
+    filename_base = Path(filepath).stem
     logpath = os.path.join(LOG_FOLDER, f"{filename_base}.log")
 
     try:
@@ -114,7 +160,7 @@ def run_script(filepath):
             encoding='utf-8',
             check=False
         )
-        os.makedirs(LOG_FOLDER, exist_ok=True) # Ensure log folder exists
+        os.makedirs(LOG_FOLDER, exist_ok=True)
         with open(logpath, 'w', encoding='utf-8') as f:
             f.write(f"--- STDOUT ---\n{result.stdout}\n")
             f.write(f"--- STDERR ---\n{result.stderr}\n")
@@ -133,11 +179,8 @@ def run_script(filepath):
 
 @app.route('/submit_code', methods=['POST', 'OPTIONS']) # Allow OPTIONS method
 def submit_code():
-    # Handle OPTIONS preflight request (Flask-CORS should mostly handle this,
-    # but explicit handling can sometimes be needed depending on exact config)
     if request.method == 'OPTIONS':
-        # Flask-CORS adds headers, so we can just return an empty OK response
-        return '', 204 # Use 204 No Content for OPTIONS is common
+        return '', 204 # Handle preflight
 
     # Handle POST request
     if request.method == 'POST':
@@ -155,44 +198,60 @@ def submit_code():
         save_filepath = None
         final_save_filename = None
         extracted_filename_raw = None
-        is_likely_python = False
+        detected_language_name = "Unknown"
 
-        # Determine filename and type
+        # --- Determine filename and type ---
         match = FILENAME_EXTRACT_REGEX.search(received_code)
         if match:
             extracted_filename_raw = match.group(1).strip()
             print(f"Found filename marker: '{extracted_filename_raw}'", file=sys.stderr)
             sanitized = sanitize_filename(extracted_filename_raw)
+
             if sanitized:
-                print(f"Sanitized filename: '{sanitized}'", file=sys.stderr)
+                # Check if sanitized filename has a valid extension
+                _ , file_ext = os.path.splitext(sanitized)
+                if not file_ext or len(file_ext) < 2: # Basic check for actual extension part
+                     print(f"Warning: Sanitized filename '{sanitized}' lacks a proper extension. Detecting from content.", file=sys.stderr)
+                     detected_ext, detected_language_name = detect_language_and_extension(received_code)
+                     base_name = os.path.splitext(sanitized)[0] # Keep sanitized base name
+                     sanitized = base_name + detected_ext # Combine base + detected ext
+                     print(f"Using detected extension: '{sanitized}'", file=sys.stderr)
+
                 save_filepath = find_unique_filepath(sanitized)
                 final_save_filename = os.path.basename(save_filepath)
-                is_likely_python = final_save_filename.lower().endswith('.py')
-                print(f"Using unique filepath: '{save_filepath}', is_python: {is_likely_python}", file=sys.stderr)
+                print(f"Using unique filepath: '{save_filepath}'", file=sys.stderr)
             else:
-                print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Falling back to timestamped Python name.", file=sys.stderr)
-                save_filepath = generate_timestamped_py_filepath()
-                final_save_filename = os.path.basename(save_filepath)
-                is_likely_python = True
-                print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
+                print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Detecting from content.", file=sys.stderr)
+                # Fall through to detection logic
         else:
-            print("Info: No filename marker found. Saving as timestamped Python file.", file=sys.stderr)
-            save_filepath = generate_timestamped_py_filepath()
-            final_save_filename = os.path.basename(save_filepath)
-            is_likely_python = True
-            print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
+             print("Info: No filename marker found. Detecting from content.", file=sys.stderr)
+             # Fall through to detection logic
 
-        # Save the received code
+        # --- Fallback / Content Detection Logic ---
+        if save_filepath is None:
+            detected_ext, detected_language_name = detect_language_and_extension(received_code)
+            base_prefix = detected_language_name.lower().replace(" ", "_") # e.g., 'python', 'java_script'
+            save_filepath = generate_timestamped_filepath(extension=detected_ext, base_prefix=base_prefix)
+            final_save_filename = os.path.basename(save_filepath)
+            print(f"Using generated filepath based on content detection: '{save_filepath}'", file=sys.stderr)
+
+
+        # Determine if final file is Python AFTER deciding the filename
+        is_likely_python = final_save_filename.lower().endswith('.py')
+
+        # --- Save the received code ---
         try:
             os.makedirs(SAVE_FOLDER, exist_ok=True)
             with open(save_filepath, 'w', encoding='utf-8') as f:
+                # Save the original code as received, including markers if present
                 f.write(received_code)
             print(f"Code saved successfully to {save_filepath}", file=sys.stderr)
         except Exception as e:
              print(f"Error: Failed to save file '{save_filepath}': {str(e)}", file=sys.stderr)
              return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
 
-        # Check Syntax and Optionally Run ONLY if it's a Python file
+
+        # --- Check Syntax and Optionally Run ONLY if it's a Python file ---
         syntax_ok = None
         run_success = None
         log_filename = None
@@ -208,7 +267,6 @@ def submit_code():
                     run_success, logpath = run_script(save_filepath)
                     log_filename = os.path.basename(logpath) if logpath else None
                     print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
-
             except SyntaxError as e:
                 syntax_ok = False
                 print(f"Syntax Error in {final_save_filename}: Line {e.lineno}, Offset: {e.offset}, Message: {e.msg}", file=sys.stderr)
@@ -221,7 +279,6 @@ def submit_code():
                     log_filename = os.path.basename(logpath_err)
                 except Exception as log_e:
                      print(f"Error writing syntax error log for {final_save_filename}: {log_e}", file=sys.stderr)
-
             except Exception as compile_e:
                 syntax_ok = False
                 run_success = False
@@ -245,12 +302,12 @@ def submit_code():
             'log_file': log_filename,
             'syntax_ok': syntax_ok,
             'run_success': run_success,
-            'source_file_marker': extracted_filename_raw
+            'source_file_marker': extracted_filename_raw,
+            'detected_language': detected_language_name if extracted_filename_raw is None else None # Indicate detected lang if marker wasn't used for filename
         }
         print(f"Sending response: {response_data}", file=sys.stderr)
         return jsonify(response_data)
 
-    # Should not be reached if only POST/OPTIONS allowed
     return jsonify({'status': 'error', 'message': f'Unsupported method: {request.method}'}), 405
 
 
@@ -325,5 +382,6 @@ if __name__ == '__main__':
     print(f"Saving received files to: {Path(SAVE_FOLDER).resolve()}", file=sys.stderr)
     print(f"Saving logs to: {Path(LOG_FOLDER).resolve()}", file=sys.stderr)
     print("Will use filename from start marker if present and valid.", file=sys.stderr)
-    print("*** CORS enabled for all origins ***") # Indicate CORS is active
+    print("Will attempt language detection for fallback filename extensions.", file=sys.stderr)
+    print("*** CORS enabled for all origins ***")
     app.run(host=host_ip, port=port_num, debug=False)
