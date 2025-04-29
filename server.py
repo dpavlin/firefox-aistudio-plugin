@@ -1,13 +1,15 @@
-# server.py
+# --- START OF FILE server.py ---
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask_cors import CORS # Import CORS
 import os
 import datetime
 import subprocess
-import re # Added for regex
-import sys # Added for stderr printing and sys.executable
-from pathlib import Path # Added for path handling
+import re
+import sys
+from pathlib import Path
 
 app = Flask(__name__)
+CORS(app) # Enable CORS for all routes by default
 
 SAVE_FOLDER = 'received_codes'
 LOG_FOLDER = 'logs'
@@ -15,8 +17,6 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 os.makedirs(LOG_FOLDER, exist_ok=True)
 
 # --- Regex to EXTRACT filename FROM START MARKER ---
-# Captures filename in group 1. Looks at the beginning of the string.
-# Allows various comment styles (#, //, /*, --) or no comment leader
 FILENAME_EXTRACT_REGEX = re.compile(
     r"^\s*(?://|#|--|\*)\s*--- START OF FILE (.+?) ---\s*\n",
     re.IGNORECASE
@@ -131,128 +131,129 @@ def run_script(filepath):
             f.write(f"Error running script: {str(e)}\n")
         return False, logpath
 
-@app.route('/submit_code', methods=['POST'])
+@app.route('/submit_code', methods=['POST', 'OPTIONS']) # Allow OPTIONS method
 def submit_code():
-    data = request.get_json()
-    if not data:
-        print("Error: No JSON data received.", file=sys.stderr)
-        return jsonify({'status': 'error', 'message': 'No JSON data received'}), 400
+    # Handle OPTIONS preflight request (Flask-CORS should mostly handle this,
+    # but explicit handling can sometimes be needed depending on exact config)
+    if request.method == 'OPTIONS':
+        # Flask-CORS adds headers, so we can just return an empty OK response
+        return '', 204 # Use 204 No Content for OPTIONS is common
 
-    received_code = data.get('code', '')
+    # Handle POST request
+    if request.method == 'POST':
+        data = request.get_json()
+        if not data:
+            print("Error: No JSON data received.", file=sys.stderr)
+            return jsonify({'status': 'error', 'message': 'No JSON data received'}), 400
 
-    if not received_code or received_code.isspace():
-        print("Error: Empty code received.", file=sys.stderr)
-        return jsonify({'status': 'error', 'message': 'Empty code received'}), 400
+        received_code = data.get('code', '')
 
-    save_filepath = None
-    final_save_filename = None
-    extracted_filename_raw = None
-    is_likely_python = False # Default to false unless determined otherwise
+        if not received_code or received_code.isspace():
+            print("Error: Empty code received.", file=sys.stderr)
+            return jsonify({'status': 'error', 'message': 'Empty code received'}), 400
 
-    # --- Determine filename and type ---
-    match = FILENAME_EXTRACT_REGEX.search(received_code)
-    if match:
-        extracted_filename_raw = match.group(1).strip()
-        print(f"Found filename marker: '{extracted_filename_raw}'", file=sys.stderr)
-        sanitized = sanitize_filename(extracted_filename_raw)
+        save_filepath = None
+        final_save_filename = None
+        extracted_filename_raw = None
+        is_likely_python = False
 
-        if sanitized:
-            print(f"Sanitized filename: '{sanitized}'", file=sys.stderr)
-            save_filepath = find_unique_filepath(sanitized) # Handles collisions
-            final_save_filename = os.path.basename(save_filepath)
-            # Check if the FINAL saved filename ends with .py
-            is_likely_python = final_save_filename.lower().endswith('.py')
-            print(f"Using unique filepath: '{save_filepath}', is_python: {is_likely_python}", file=sys.stderr)
+        # Determine filename and type
+        match = FILENAME_EXTRACT_REGEX.search(received_code)
+        if match:
+            extracted_filename_raw = match.group(1).strip()
+            print(f"Found filename marker: '{extracted_filename_raw}'", file=sys.stderr)
+            sanitized = sanitize_filename(extracted_filename_raw)
+            if sanitized:
+                print(f"Sanitized filename: '{sanitized}'", file=sys.stderr)
+                save_filepath = find_unique_filepath(sanitized)
+                final_save_filename = os.path.basename(save_filepath)
+                is_likely_python = final_save_filename.lower().endswith('.py')
+                print(f"Using unique filepath: '{save_filepath}', is_python: {is_likely_python}", file=sys.stderr)
+            else:
+                print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Falling back to timestamped Python name.", file=sys.stderr)
+                save_filepath = generate_timestamped_py_filepath()
+                final_save_filename = os.path.basename(save_filepath)
+                is_likely_python = True
+                print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
         else:
-            print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Falling back to timestamped Python name.", file=sys.stderr)
+            print("Info: No filename marker found. Saving as timestamped Python file.", file=sys.stderr)
             save_filepath = generate_timestamped_py_filepath()
             final_save_filename = os.path.basename(save_filepath)
-            is_likely_python = True # Fallback assumes Python
+            is_likely_python = True
             print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
-    else:
-        print("Info: No filename marker found. Saving as timestamped Python file.", file=sys.stderr)
-        save_filepath = generate_timestamped_py_filepath()
-        final_save_filename = os.path.basename(save_filepath)
-        is_likely_python = True # Fallback assumes Python
-        print(f"Using generated filepath: '{save_filepath}'", file=sys.stderr)
 
-
-    # --- Save the received code ---
-    try:
-        os.makedirs(SAVE_FOLDER, exist_ok=True)
-        with open(save_filepath, 'w', encoding='utf-8') as f:
-            # Save the original code as received, including markers if present
-            f.write(received_code)
-        print(f"Code saved successfully to {save_filepath}", file=sys.stderr)
-    except Exception as e:
-         print(f"Error: Failed to save file '{save_filepath}': {str(e)}", file=sys.stderr)
-         return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
-
-
-    # --- Check Syntax and Optionally Run ONLY if it's a Python file ---
-    syntax_ok = None # Use None to indicate check wasn't performed
-    run_success = None
-    log_filename = None
-
-    if is_likely_python:
-        print(f"File '{final_save_filename}' is Python, performing checks.", file=sys.stderr)
+        # Save the received code
         try:
-            # Compile the received code (markers shouldn't affect syntax check itself if comments)
-            compile(received_code, save_filepath, 'exec')
-            syntax_ok = True
-            print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
-            if AUTO_RUN_ON_SYNTAX_OK:
-                print(f"Attempting to run {final_save_filename}", file=sys.stderr)
-                run_success, logpath = run_script(save_filepath) # Run the saved file
-                log_filename = os.path.basename(logpath) if logpath else None
-                print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
+            os.makedirs(SAVE_FOLDER, exist_ok=True)
+            with open(save_filepath, 'w', encoding='utf-8') as f:
+                f.write(received_code)
+            print(f"Code saved successfully to {save_filepath}", file=sys.stderr)
+        except Exception as e:
+             print(f"Error: Failed to save file '{save_filepath}': {str(e)}", file=sys.stderr)
+             return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
 
-        except SyntaxError as e:
-            syntax_ok = False # Syntax definitely failed
-            print(f"Syntax Error in {final_save_filename}: Line {e.lineno}, Offset: {e.offset}, Message: {e.msg}", file=sys.stderr)
-            log_filename_base = Path(save_filepath).stem
-            logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_syntax_error.log")
+        # Check Syntax and Optionally Run ONLY if it's a Python file
+        syntax_ok = None
+        run_success = None
+        log_filename = None
+
+        if is_likely_python:
+            print(f"File '{final_save_filename}' is Python, performing checks.", file=sys.stderr)
             try:
-                os.makedirs(LOG_FOLDER, exist_ok=True)
-                with open(logpath_err, 'w', encoding='utf-8') as f:
-                     f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nLine: {e.lineno}, Offset: {e.offset}\nMessage: {e.msg}\nCode Context:\n{e.text}")
-                log_filename = os.path.basename(logpath_err)
-            except Exception as log_e:
-                 print(f"Error writing syntax error log for {final_save_filename}: {log_e}", file=sys.stderr)
+                compile(received_code, save_filepath, 'exec')
+                syntax_ok = True
+                print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
+                if AUTO_RUN_ON_SYNTAX_OK:
+                    print(f"Attempting to run {final_save_filename}", file=sys.stderr)
+                    run_success, logpath = run_script(save_filepath)
+                    log_filename = os.path.basename(logpath) if logpath else None
+                    print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
 
-        except Exception as compile_e:
-            syntax_ok = False # Treat other compile errors as syntax failure
-            run_success = False
-            print(f"Error during compile/run setup for {final_save_filename}: {str(compile_e)}", file=sys.stderr)
-            log_filename_base = Path(save_filepath).stem
-            logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_compile_error.log")
-            try:
-                 os.makedirs(LOG_FOLDER, exist_ok=True)
-                 with open(logpath_err, 'w', encoding='utf-8') as f:
-                     f.write(f"Error during compile/run setup:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nError: {str(compile_e)}\n")
-                 log_filename = os.path.basename(logpath_err)
-            except Exception as log_e:
-                 print(f"Error writing compile error log for {final_save_filename}: {log_e}", file=sys.stderr)
-    else:
-        print(f"File '{final_save_filename}' is not Python, skipping syntax check and run.", file=sys.stderr)
-        # syntax_ok and run_success remain None
+            except SyntaxError as e:
+                syntax_ok = False
+                print(f"Syntax Error in {final_save_filename}: Line {e.lineno}, Offset: {e.offset}, Message: {e.msg}", file=sys.stderr)
+                log_filename_base = Path(save_filepath).stem
+                logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_syntax_error.log")
+                try:
+                    os.makedirs(LOG_FOLDER, exist_ok=True)
+                    with open(logpath_err, 'w', encoding='utf-8') as f:
+                         f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nLine: {e.lineno}, Offset: {e.offset}\nMessage: {e.msg}\nCode Context:\n{e.text}")
+                    log_filename = os.path.basename(logpath_err)
+                except Exception as log_e:
+                     print(f"Error writing syntax error log for {final_save_filename}: {log_e}", file=sys.stderr)
+
+            except Exception as compile_e:
+                syntax_ok = False
+                run_success = False
+                print(f"Error during compile/run setup for {final_save_filename}: {str(compile_e)}", file=sys.stderr)
+                log_filename_base = Path(save_filepath).stem
+                logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_compile_error.log")
+                try:
+                     os.makedirs(LOG_FOLDER, exist_ok=True)
+                     with open(logpath_err, 'w', encoding='utf-8') as f:
+                         f.write(f"Error during compile/run setup:\nFile: {final_save_filename} (Marker: {extracted_filename_raw or 'None'})\nError: {str(compile_e)}\n")
+                     log_filename = os.path.basename(logpath_err)
+                except Exception as log_e:
+                     print(f"Error writing compile error log for {final_save_filename}: {log_e}", file=sys.stderr)
+        else:
+            print(f"File '{final_save_filename}' is not Python, skipping syntax check and run.", file=sys.stderr)
+
+        # Return Response
+        response_data = {
+            'status': 'success',
+            'saved_as': final_save_filename,
+            'log_file': log_filename,
+            'syntax_ok': syntax_ok,
+            'run_success': run_success,
+            'source_file_marker': extracted_filename_raw
+        }
+        print(f"Sending response: {response_data}", file=sys.stderr)
+        return jsonify(response_data)
+
+    # Should not be reached if only POST/OPTIONS allowed
+    return jsonify({'status': 'error', 'message': f'Unsupported method: {request.method}'}), 405
 
 
-    # --- Return Response ---
-    response_data = {
-        'status': 'success',
-        'saved_as': final_save_filename,
-        'log_file': log_filename,
-        'syntax_ok': syntax_ok, # Will be True, False, or None
-        'run_success': run_success, # Will be True, False, or None
-        'source_file_marker': extracted_filename_raw # Include the raw marker filename found
-    }
-
-    print(f"Sending response: {response_data}", file=sys.stderr)
-    return jsonify(response_data)
-
-
-# --- Log Routes (Keep improved versions) ---
 @app.route('/logs')
 def list_logs():
     log_files = []
@@ -324,4 +325,5 @@ if __name__ == '__main__':
     print(f"Saving received files to: {Path(SAVE_FOLDER).resolve()}", file=sys.stderr)
     print(f"Saving logs to: {Path(LOG_FOLDER).resolve()}", file=sys.stderr)
     print("Will use filename from start marker if present and valid.", file=sys.stderr)
+    print("*** CORS enabled for all origins ***") # Indicate CORS is active
     app.run(host=host_ip, port=port_num, debug=False)
