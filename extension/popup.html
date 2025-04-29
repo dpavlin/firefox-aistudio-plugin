@@ -1,15 +1,131 @@
+<!-- popup.html -->
 <!DOCTYPE html>
 <html>
-  <head>
+<head>
     <title>AI Code Capture</title>
-  </head>
-  <body>
+    <style>
+        body {
+            font-family: sans-serif;
+            width: 280px; /* Wider for better display */
+            padding: 10px;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        h1 {
+            font-size: 16px;
+            margin-top: 0;
+            color: #1a1a1a;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 5px;
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between; /* Pushes label and toggle apart */
+            margin-bottom: 15px;
+            cursor: pointer; /* Indicate the whole area is clickable */
+            padding: 5px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+        .toggle-container:hover {
+            background-color: #e0e0e0;
+        }
+        .toggle-container label {
+             font-weight: bold;
+             cursor: pointer; /* Match container cursor */
+             flex-grow: 1; /* Allow label to take space */
+             margin-right: 10px;
+        }
+        /* Basic switch styling */
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 40px; /* Smaller switch */
+          height: 20px;
+        }
+        .switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          transition: .4s;
+          border-radius: 20px; /* Rounded */
+        }
+        .slider:before {
+          position: absolute;
+          content: "";
+          height: 14px; /* Smaller handle */
+          width: 14px;
+          left: 3px;  /* Adjusted position */
+          bottom: 3px; /* Adjusted position */
+          background-color: white;
+          transition: .4s;
+          border-radius: 50%;
+        }
+        input:checked + .slider {
+          background-color: #4CAF50; /* Green when active */
+        }
+        input:checked + .slider:before {
+          transform: translateX(20px); /* Move handle */
+        }
+        #status-container {
+            margin-top: 10px;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+        }
+        #status-container h2 {
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        #last-response {
+            font-size: 12px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            padding: 8px;
+            border-radius: 4px;
+            white-space: pre-wrap; /* Keep formatting */
+            word-wrap: break-word; /* Wrap long lines */
+            max-height: 150px; /* Limit height */
+            overflow-y: auto; /* Add scroll if needed */
+            color: #555;
+        }
+         #last-response.error {
+            color: #a94442; /* Reddish color for errors */
+            background-color: #f2dede;
+            border-color: #ebccd1;
+        }
+         #last-response.success {
+            color: #3c763d; /* Greenish color for success */
+            background-color: #dff0d8;
+            border-color: #d6e9c6;
+        }
+    </style>
+</head>
+<body>
     <h1>AI Code Capture</h1>
-    <button id="sendCodeButton">Send Code to Server</button>
-    <script>
-      document.getElementById('sendCodeButton').addEventListener('click', function() {
-        chrome.runtime.sendMessage({ action: 'captureCode' });
-      });
-    </script>
-  </body>
+
+    <div class="toggle-container">
+        <label for="activationToggle">Auto-Capture:</label>
+        <label class="switch">
+            <input type="checkbox" id="activationToggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <div id="status-container">
+        <h2>Last Server Response:</h2>
+        <pre id="last-response">Loading...</pre>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
 </html>

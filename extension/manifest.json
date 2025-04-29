@@ -19,6 +19,12 @@
     }
   ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "AI Code Capture"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ai-code-capture@example.com"
+    }
   }
 }
