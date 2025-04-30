@@ -6,7 +6,7 @@ apt install python3-flask python3-flask-cors
 
 ALWAYS include full file content when changing files and filename.
 Add comment in first line which include filename with marker
--- START OF FILE filename.py ---
+@@FILENAME@@ filename.py
 for files which support comments but don't modify .json
 files since this is not valid.
 
