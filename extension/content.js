@@ -10,68 +10,83 @@ const codeElementSelector = 'ms-code-block pre code';
 const modelTurnSelector = 'ms-chat-turn:has(div.chat-turn-container.model)';
 
 // --- Highlight Logic Variables ---
-const HIGHLIGHT_INITIAL_CLASS = 'aicapture-highlight-initial';
-const HIGHLIGHT_SUCCESS_CLASS = 'aicapture-success';
-const HIGHLIGHT_ERROR_CLASS = 'aicapture-error';
-const HIGHLIGHT_FADEOUT_CLASS = 'aicapture-fadeout';
-const HIGHLIGHT_FINAL_DURATION_MS = 3000;
-const HIGHLIGHT_FADEOUT_DELAY_MS = 2500;
-const highlightTimers = new Map();
-// --- Use a unique attribute instead of innerText for mapping ---
-const HIGHLIGHT_ID_ATTR = 'data-aicapture-id';
-let highlightCounter = 0; // Simple counter for unique IDs
+const HIGHLIGHT_INITIAL_CLASS = 'aicapture-highlight-initial'; // Use new class for initial outline
+const HIGHLIGHT_SUCCESS_CLASS = 'aicapture-success'; // Green border for success
+const HIGHLIGHT_ERROR_CLASS = 'aicapture-error';     // Red border for error
+const HIGHLIGHT_FADEOUT_CLASS = 'aicapture-fadeout'; // Class to trigger fade-out transition
+const HIGHLIGHT_FINAL_DURATION_MS = 3000; // How long GREEN/RED border stays
+const HIGHLIGHT_FADEOUT_DELAY_MS = 2500; // How long GREEN/RED stays before starting fade
+const highlightTimers = new Map(); // Map<Element, { initialTimer: number, finalTimer: number, fadeTimer: number }>
+const codeElementMap = new Map();
 
 // --- Debounce and Duplicate Check ---
 let debounceTimer;
 const DEBOUNCE_DELAY_MS = 1500;
-const sentCodeBlocksContent = new Set(); // Still useful to prevent re-sending identical *content*
+const sentCodeBlocksContent = new Set();
 
 // --- Helper Function to Apply/Remove/Update Highlight ---
 function applyHighlight(element, state = 'initial') {
   if (!element) return;
+
   const existingTimers = highlightTimers.get(element);
   if (existingTimers) {
     clearTimeout(existingTimers.initialTimer);
     clearTimeout(existingTimers.finalTimer);
     clearTimeout(existingTimers.fadeTimer);
   }
+
   console.log(`Applying ${state} highlight to:`, element);
+
+  // Remove all potentially existing highlight classes first
   element.classList.remove(
-      HIGHLIGHT_INITIAL_CLASS, HIGHLIGHT_SUCCESS_CLASS,
-      HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS
+      HIGHLIGHT_INITIAL_CLASS,
+      HIGHLIGHT_SUCCESS_CLASS,
+      HIGHLIGHT_ERROR_CLASS,
+      HIGHLIGHT_FADEOUT_CLASS
   );
-  let initialTimerId = null, finalTimerId = null, fadeTimerId = null;
+
+  let initialTimerId = null;
+  let finalTimerId = null;
+  let fadeTimerId = null;
+  let currentHighlightClass = null;
 
   switch (state) {
     case 'initial':
-      element.classList.add(HIGHLIGHT_INITIAL_CLASS);
+      currentHighlightClass = HIGHLIGHT_INITIAL_CLASS;
+      element.classList.add(currentHighlightClass);
+      // Set a timer to remove the initial highlight if no server response comes back
+      // *** FIX: Use HIGHLIGHT_FINAL_DURATION_MS or a dedicated variable ***
       initialTimerId = setTimeout(() => {
+         console.log("Initial highlight timeout, removing:", element);
          element.classList.remove(HIGHLIGHT_INITIAL_CLASS);
          highlightTimers.delete(element);
-      }, HIGHLIGHT_FINAL_DURATION_MS * 3);
+      }, HIGHLIGHT_FINAL_DURATION_MS * 3); // Use existing duration, maybe longer timeout
       break;
     case 'success':
-      element.classList.add(HIGHLIGHT_SUCCESS_CLASS);
-      fadeTimerId = setTimeout(() => element.classList.add(HIGHLIGHT_FADEOUT_CLASS), HIGHLIGHT_FADEOUT_DELAY_MS);
+      currentHighlightClass = HIGHLIGHT_SUCCESS_CLASS;
+      element.classList.add(currentHighlightClass);
+      fadeTimerId = setTimeout(() => {
+         element.classList.add(HIGHLIGHT_FADEOUT_CLASS);
+      }, HIGHLIGHT_FADEOUT_DELAY_MS);
       finalTimerId = setTimeout(() => {
         element.classList.remove(HIGHLIGHT_SUCCESS_CLASS, HIGHLIGHT_FADEOUT_CLASS);
         highlightTimers.delete(element);
-        element.removeAttribute(HIGHLIGHT_ID_ATTR); // Clean up attribute
       }, HIGHLIGHT_FINAL_DURATION_MS);
       break;
     case 'error':
-      element.classList.add(HIGHLIGHT_ERROR_CLASS);
-      fadeTimerId = setTimeout(() => element.classList.add(HIGHLIGHT_FADEOUT_CLASS), HIGHLIGHT_FADEOUT_DELAY_MS);
+      currentHighlightClass = HIGHLIGHT_ERROR_CLASS;
+      element.classList.add(currentHighlightClass);
+      fadeTimerId = setTimeout(() => {
+          element.classList.add(HIGHLIGHT_FADEOUT_CLASS);
+       }, HIGHLIGHT_FADEOUT_DELAY_MS);
       finalTimerId = setTimeout(() => {
         element.classList.remove(HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS);
         highlightTimers.delete(element);
-        element.removeAttribute(HIGHLIGHT_ID_ATTR); // Clean up attribute
       }, HIGHLIGHT_FINAL_DURATION_MS);
       break;
     case 'remove':
        element.classList.remove(HIGHLIGHT_INITIAL_CLASS, HIGHLIGHT_SUCCESS_CLASS, HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS);
        highlightTimers.delete(element);
-       element.removeAttribute(HIGHLIGHT_ID_ATTR); // Clean up attribute
        break;
   }
    if (state !== 'remove') {
@@ -88,41 +103,28 @@ function findAndSendNewCodeBlocks(target) {
     console.log(`Processing turns within target:`, target);
     const modelTurns = target.querySelectorAll(modelTurnSelector);
     if (!modelTurns || modelTurns.length === 0) return;
+
     console.log(`Found ${modelTurns.length} model turn(s). Processing...`);
 
     modelTurns.forEach((turnElement, turnIndex) => {
         const codeElements = turnElement.querySelectorAll(codeElementSelector);
         if (!codeElements || codeElements.length === 0) return;
+
         console.log(` -> Found ${codeElements.length} code element(s) in Turn ${turnIndex + 1}.`);
 
         codeElements.forEach((codeElement, codeIndex) => {
-            // --- Check if element ALREADY has our processing ID ---
-            if (codeElement.hasAttribute(HIGHLIGHT_ID_ATTR)) {
-                // console.log(` -> Code block ${codeIndex + 1} already being processed or waiting for response. Skipping.`);
-                return; // Skip if we're already handling this specific element
-            }
-
             const capturedCode = codeElement.innerText;
             const trimmedCode = capturedCode ? capturedCode.trim() : '';
 
-            // Check content duplication separately
             if (trimmedCode.length > 0 && !sentCodeBlocksContent.has(capturedCode)) {
-                 const uniqueId = `aicapture-${Date.now()}-${highlightCounter++}`;
-                 console.log(` -> Found NEW code block ${codeIndex + 1} (ID: ${uniqueId}). Applying INITIAL highlight and sending to background:`, capturedCode.substring(0, 80) + "...");
-
-                 // --- Add unique ID attribute ---
-                 codeElement.setAttribute(HIGHLIGHT_ID_ATTR, uniqueId);
-
-                 applyHighlight(codeElement, 'initial');
-                 // --- Send ID along with code ---
-                 chrome.runtime.sendMessage({
-                     action: 'sendCodeDirectly',
-                     code: capturedCode,
-                     captureId: uniqueId // Send the ID
-                 });
-                 sentCodeBlocksContent.add(capturedCode); // Still track content to avoid resending identical blocks
+                 console.log(` -> Found NEW code block ${codeIndex + 1}. Applying INITIAL highlight and sending to background:`, capturedCode.substring(0, 80) + "...");
+                 applyHighlight(codeElement, 'initial'); // Use 'initial' state
+                 codeElementMap.set(capturedCode, codeElement);
+                 chrome.runtime.sendMessage({ action: 'sendCodeDirectly', code: capturedCode });
+                 sentCodeBlocksContent.add(capturedCode);
+                 setTimeout(() => { codeElementMap.delete(capturedCode); }, 35000);
             } else if (sentCodeBlocksContent.has(capturedCode)) {
-                 console.log(` -> Code block ${codeIndex + 1} content already sent. Skipping.`);
+                 console.log(` -> Code block ${codeIndex + 1} already sent. Skipping.`);
             } else {
                  console.log(` -> Code block ${codeIndex + 1} is empty. Skipping.`);
             }
@@ -134,8 +136,12 @@ function findAndSendNewCodeBlocks(target) {
 // --- Function to get initial activation state ---
 function loadActivationState() {
     chrome.storage.local.get([ACTIVATION_STORAGE_KEY], (result) => {
-        if (chrome.runtime.lastError) { console.error("Error reading activation state:", chrome.runtime.lastError.message); isExtensionActivated = true; }
-        else { isExtensionActivated = result.isActivated !== undefined ? result.isActivated : true; }
+        if (chrome.runtime.lastError) {
+            console.error("Error reading activation state:", chrome.runtime.lastError.message);
+            isExtensionActivated = true;
+        } else {
+            isExtensionActivated = result.isActivated !== undefined ? result.isActivated : true;
+        }
         console.log(`Content script initial activation state: ${isExtensionActivated}`);
     });
 }
@@ -148,24 +154,35 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
 });
 
+
 // --- MutationObserver Setup ---
 const targetNode = document.querySelector(targetNodeSelector);
+
 if (targetNode) {
     console.log("Target node found:", targetNode, "Setting up MutationObserver.");
     const callback = function(mutationsList, observer) {
         let relevantMutationDetected = false;
-        // Simplified check - trigger debounce on almost any relevant change within target
         for(const mutation of mutationsList) {
-             if (mutation.type === 'childList' || mutation.type === 'subtree' || mutation.type === 'characterData') {
-                 relevantMutationDetected = true;
-                 break;
+             if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                 for (const node of mutation.addedNodes) {
+                     if (node.nodeType === Node.ELEMENT_NODE && (node.matches(modelTurnSelector) || node.querySelector(modelTurnSelector))) {
+                         relevantMutationDetected = true; break;
+                     }
+                 }
+             }
+             if (relevantMutationDetected) break;
+             if (mutation.type === 'subtree' || mutation.type === 'characterData') {
+                 let parentTurn = mutation.target.parentElement?.closest('ms-chat-turn');
+                 if (parentTurn?.querySelector('div.chat-turn-container.model')) {
+                    relevantMutationDetected = true; break;
+                 }
              }
         }
         if (relevantMutationDetected) {
-             // console.log("Relevant mutation detected, scheduling code check after debounce."); // Less verbose
+             console.log("Relevant mutation detected, scheduling code check after debounce.");
              clearTimeout(debounceTimer);
              debounceTimer = setTimeout(() => {
-                 // console.log("MutationObserver running findAndSendNewCodeBlocks after debounce."); // Less verbose
+                 console.log("MutationObserver running findAndSendNewCodeBlocks after debounce.");
                  findAndSendNewCodeBlocks(targetNode);
              }, DEBOUNCE_DELAY_MS);
         }
@@ -181,24 +198,18 @@ if (targetNode) {
     console.error(`Could not find the target node ('${targetNodeSelector}') to observe.`);
 }
 
+
 // --- Listener for updates from Background Script ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'serverProcessingComplete') {
-    console.log("CONTENT SCRIPT: Received 'serverProcessingComplete'", message); // Added log
-    // --- Find element by ID attribute ---
-    const elementId = message.captureId;
-    if (!elementId) {
-        console.warn("Received server response without capture ID.");
-        return false;
-    }
-    const codeElement = document.querySelector(`[${HIGHLIGHT_ID_ATTR}="${elementId}"]`);
-
+    console.log("Received server processing result:", message);
+    const codeElement = codeElementMap.get(message.originalCode);
     if (codeElement) {
-      console.log(`Found matching element for ID ${elementId}, applying final highlight state (Success: ${message.success})`);
+      console.log(`Found matching element for code, applying final highlight state (Success: ${message.success})`);
       applyHighlight(codeElement, message.success ? 'success' : 'error');
-      // No need to manage map anymore, attribute is removed by applyHighlight on final timer
+      codeElementMap.delete(message.originalCode);
     } else {
-      console.warn(`Could not find the specific code element on page with ID ${elementId} to apply final highlight.`);
+      console.warn("Could not find the specific code element on page to apply final highlight for code:", message.originalCode.substring(0, 50) + "...");
     }
   }
   return false; // No async response needed
