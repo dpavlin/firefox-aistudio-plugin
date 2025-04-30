@@ -1,4 +1,3 @@
-// @@FILENAME@@ content.js
 console.log("AI Code Capture content script loaded (v3 - Port aware).");
 
 // --- Storage Keys & Default Port ---

@@ -1,3 +1,4 @@
+// @@FILENAME@@ background.js
 console.log("Background script (v4 - Test Connection) loaded.");
 
 // --- Storage Keys & Default Port ---
