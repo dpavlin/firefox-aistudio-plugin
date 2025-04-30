@@ -1,4 +1,3 @@
-// @@FILENAME@@ background.js
 console.log("Background script (v3 - Per-Tab Port) loaded.");
 
 // --- Storage Keys & Default Port ---

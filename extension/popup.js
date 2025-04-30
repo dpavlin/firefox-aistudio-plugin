@@ -1,4 +1,3 @@
-// @@FILENAME@@ popup.js
 document.addEventListener('DOMContentLoaded', () => {
     const activationToggle = document.getElementById('activationToggle');
     const serverPortInput = document.getElementById('serverPort');
