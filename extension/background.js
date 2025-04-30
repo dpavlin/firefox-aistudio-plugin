@@ -126,4 +126,15 @@ async function sendCodeToServer(codeToSend, captureId) { // Added captureId para
                   captureId: captureId, // Send the ID back
                   success: serverResponseOk,
                   details: responseDataForStorage
-              }).catch(err => console.warn(`Could not send result to
+              }).catch(err => console.warn(`Could not send result to tab ${originatingTabId}:`, err.message));
+              requestTabMap.delete(captureId); // Clean up map
+          } else { console.warn(`Could not find originating tab ID for captureId ${captureId}`); }
+
+          chrome.runtime.sendMessage({action: 'updatePopupResponse', lastResponse: responseDataForStorage})
+             .catch(err => { if (err.message !== "Could not establish connection. Receiving end does not exist.") console.warn("Could not send response update to popup:", err.message); });
+      });
+  }
+}
+
+console.log("Background script finished loading.");
+// --- END OF FILE background.js ---
