@@ -17,18 +17,16 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 os.makedirs(LOG_FOLDER, exist_ok=True)
 
 # --- Regex to EXTRACT filename FROM NEW @@FILENAME@@ MARKER ---
-# Captures filename in group 1. Looks at the beginning of the string.
-# Allows common comment styles (#, //) followed by the marker.
 FILENAME_EXTRACT_REGEX = re.compile(
-    r"^\s*(?://|#)\s*@@FILENAME@@\s+(.+?)\s*$", # Match comment, marker, space(s), filename, optional trailing space, end of line
-    re.IGNORECASE | re.MULTILINE # Match ^ at line start, ignore case for marker
+    r"^\s*(?://|#)\s*@@FILENAME@@\s+(.+?)\s*$", # Matches start of line, comment, marker, filename, optional trailing space, end of line
+    re.IGNORECASE | re.MULTILINE
 )
 
-# --- Filename Sanitization (Unchanged) ---
+# --- Filename Sanitization ---
 FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._-]')
 MAX_FILENAME_LENGTH = 100
 
-# --- Simple Language Detection Heuristics (Unchanged) ---
+# --- Simple Language Detection Heuristics ---
 LANGUAGE_PATTERNS = {
     '.py': re.compile(r'\b(def|class|import|from|if|else|elif|for|while|try|except|print)\b', re.MULTILINE),
     '.js': re.compile(r'\b(function|var|let|const|if|else|for|while|document|window|console\.log)\b', re.MULTILINE),
@@ -45,20 +43,14 @@ def detect_language_and_extension(code: str) -> tuple[str, str]:
     """Performs simple heuristic checks to guess the language and return an extension."""
     first_lines = code.splitlines()[:3]
     if first_lines:
-        if first_lines[0].startswith('#!/usr/bin/env python') or first_lines[0].startswith('#!/usr/bin/python'):
-            return '.py', 'Python'
-        if first_lines[0].startswith('#!/bin/bash') or first_lines[0].startswith('#!/bin/sh'):
-            return '.sh', 'Shell'
-        if first_lines[0].startswith('<?php'):
-             return '.php', 'PHP'
+        if first_lines[0].startswith('#!/usr/bin/env python') or first_lines[0].startswith('#!/usr/bin/python'): return '.py', 'Python'
+        if first_lines[0].startswith('#!/bin/bash') or first_lines[0].startswith('#!/bin/sh'): return '.sh', 'Shell'
+        if first_lines[0].startswith('<?php'): return '.php', 'PHP'
 
     if LANGUAGE_PATTERNS['.html'].search(code): return '.html', 'HTML'
     if LANGUAGE_PATTERNS['.xml'].search(code): return '.xml', 'XML'
     if LANGUAGE_PATTERNS['.json'].search(code):
-         try:
-            import json
-            json.loads(code)
-            return '.json', 'JSON'
+         try: import json; json.loads(code); return '.json', 'JSON'
          except: pass
     if LANGUAGE_PATTERNS['.css'].search(code): return '.css', 'CSS'
     if LANGUAGE_PATTERNS['.py'].search(code): return '.py', 'Python'
@@ -82,12 +74,10 @@ def sanitize_filename(filename: str) -> str | None:
     sanitized = FILENAME_SANITIZE_REGEX.sub('_', filename)
     if len(sanitized) > MAX_FILENAME_LENGTH:
         base, ext = os.path.splitext(sanitized)
-        if len(ext) > (MAX_FILENAME_LENGTH - 2):
-             ext = ext[:MAX_FILENAME_LENGTH - 2] + "~"
+        if len(ext) > (MAX_FILENAME_LENGTH - 2): ext = ext[:MAX_FILENAME_LENGTH - 2] + "~"
         base = base[:MAX_FILENAME_LENGTH - len(ext) - 1]
         sanitized = f"{base}{ext}"
-    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1:
-         return None
+    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1: return None
     return sanitized
 
 
@@ -134,13 +124,11 @@ def run_script(filepath):
         return result.returncode == 0, logpath
     except subprocess.TimeoutExpired:
         os.makedirs(LOG_FOLDER, exist_ok=True)
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write("Error: Script timed out after 10 seconds.\n")
+        with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Script timed out after 10 seconds.\n")
         return False, logpath
     except Exception as e:
         os.makedirs(LOG_FOLDER, exist_ok=True)
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write(f"Error running script: {str(e)}\n")
+        with open(logpath, 'w', encoding='utf-8') as f: f.write(f"Error running script: {str(e)}\n")
         return False, logpath
 
 @app.route('/submit_code', methods=['POST', 'OPTIONS'])
@@ -163,12 +151,10 @@ def submit_code():
         extracted_filename_raw = None
         detected_language_name = "Unknown"
         code_to_save = received_code # Start with original code
-        marker_line = None
 
         # --- Determine filename and potentially strip marker ---
         match = FILENAME_EXTRACT_REGEX.search(received_code)
         if match:
-            marker_line = match.group(0) # The full matched marker line including newline
             extracted_filename_raw = match.group(1).strip()
             print(f"Found filename marker: '{extracted_filename_raw}'", file=sys.stderr)
             sanitized = sanitize_filename(extracted_filename_raw)
@@ -185,15 +171,24 @@ def submit_code():
                 save_filepath = find_unique_filepath(sanitized)
                 final_save_filename = os.path.basename(save_filepath)
                 print(f"Using unique filepath: '{save_filepath}'", file=sys.stderr)
-                # Remove the marker line from the code to be saved
-                code_to_save = received_code[len(marker_line):]
+
+                # --- Remove the marker line ---
+                marker_end_pos = match.end()
+                # Check if the character immediately after the match is a newline and skip it
+                if marker_end_pos < len(received_code) and received_code[marker_end_pos] == '\n':
+                    code_to_save = received_code[marker_end_pos + 1:]
+                else:
+                    # Otherwise, just slice from the end of the match
+                    code_to_save = received_code[marker_end_pos:]
                 print("Marker line removed from code to be saved.", file=sys.stderr)
+                # --- End marker removal ---
+
             else:
                 print(f"Warning: Invalid extracted filename '{extracted_filename_raw}'. Detecting from content.", file=sys.stderr)
-                # Fall through to detection logic, code_to_save remains original
+                # Fall through, code_to_save remains original
         else:
              print("Info: No filename marker found. Detecting from content.", file=sys.stderr)
-             # Fall through to detection logic, code_to_save remains original
+             # Fall through, code_to_save remains original
 
         # Fallback / Content Detection Logic
         if save_filepath is None:
@@ -223,7 +218,7 @@ def submit_code():
         if is_likely_python:
             print(f"File '{final_save_filename}' is Python, performing checks.", file=sys.stderr)
             try:
-                # Compile the saved code (which has marker removed if found)
+                # Compile the saved code (which should have marker removed)
                 compile(code_to_save, save_filepath, 'exec')
                 syntax_ok = True
                 print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
@@ -239,7 +234,6 @@ def submit_code():
                 logpath_err = os.path.join(LOG_FOLDER, f"{log_filename_base}_syntax_error.log")
                 try:
                     os.makedirs(LOG_FOLDER, exist_ok=True)
-                    # Include original raw filename in log for context
                     original_marker_name = extracted_filename_raw or 'None'
                     with open(logpath_err, 'w', encoding='utf-8') as f:
                          f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {original_marker_name})\nLine: {e.lineno}, Offset: {e.offset}\nMessage: {e.msg}\nCode Context:\n{e.text}")
@@ -281,18 +275,14 @@ def submit_code():
 
 @app.route('/logs')
 def list_logs():
-    # (Keep the improved version from the previous iteration)
     log_files = []
     try:
          log_dir = os.path.abspath(LOG_FOLDER)
          log_paths = [os.path.join(log_dir, f) for f in os.listdir(log_dir) if f.endswith('.log')]
          log_paths.sort(key=lambda x: os.path.getmtime(x), reverse=True)
          log_files = [os.path.basename(p) for p in log_paths]
-    except FileNotFoundError:
-         print("Log directory not found.", file=sys.stderr)
-         pass
-    except Exception as e:
-         print(f"Error listing logs: {e}", file=sys.stderr)
+    except FileNotFoundError: pass
+    except Exception as e: print(f"Error listing logs: {e}", file=sys.stderr)
 
     template = '''
     <!DOCTYPE html>
@@ -315,7 +305,7 @@ def list_logs():
       {% if logs %}
       <ul>
         {% for log in logs %}
-          <li><a href="/logs/{{ log | urlencode }}">{{ log }}</a></li> {# Ensure filename is URL encoded #}
+          <li><a href="/logs/{{ log | urlencode }}">{{ log }}</a></li>
         {% endfor %}
       </ul>
       {% else %}
