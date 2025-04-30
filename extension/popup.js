@@ -1,3 +1,4 @@
+// @@FILENAME@@ popup.js
 document.addEventListener('DOMContentLoaded', () => {
     const activationToggle = document.getElementById('activationToggle');
     const lastResponseDiv = document.getElementById('last-response');

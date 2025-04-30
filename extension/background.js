@@ -1,3 +1,4 @@
+// @@FILENAME@@ background.js
 console.log("Background script loaded. Waiting for messages.");
 
 // --- Storage Keys ---
