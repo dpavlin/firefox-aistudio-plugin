@@ -1,3 +1,4 @@
+# --- START OF FILE server.py ---
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 from flask_cors import CORS
 import os
@@ -19,38 +20,80 @@ SERVER_PORT = args.port
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-CORS(app)
+CORS(app) # Enable CORS
 
 # --- Configuration & Paths ---
-SAVE_FOLDER = 'received_codes'; LOG_FOLDER = 'logs'; EXTENSION_SUBDIR = 'extension'
-SERVER_DIR = Path(__file__).parent.resolve()
+SAVE_FOLDER = 'received_codes' # Used for non-Git tracked files / fallbacks
+LOG_FOLDER = 'logs'
+SERVER_DIR = Path(__file__).parent.resolve() # Assume server runs from repo root
 SAVE_FOLDER_PATH = SERVER_DIR / SAVE_FOLDER
 LOG_FOLDER_PATH = SERVER_DIR / LOG_FOLDER
-EXTENSION_DIR_PATH = SERVER_DIR / EXTENSION_SUBDIR if EXTENSION_SUBDIR else SERVER_DIR
 THIS_SCRIPT_NAME = Path(__file__).name
+
 os.makedirs(SAVE_FOLDER_PATH, exist_ok=True)
 os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
 
 # --- Regex & Constants ---
-FILENAME_EXTRACT_REGEX = re.compile(r"^\s*(?://|#)\s*@@FILENAME@@\s+(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._-]'); MAX_FILENAME_LENGTH = 100
+# Updated Regex: Capture filename, allow optional leading comment chars
+FILENAME_EXTRACT_REGEX = re.compile(
+    r"^\s*(?://|#|--|\/\*|-)\s*@@FILENAME@@\s+(.+?)\s*$", # Removed trailing space requirement from marker line itself
+    re.IGNORECASE | re.MULTILINE
+)
+FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._\-\/]') # Allow forward slash for paths
+MAX_FILENAME_LENGTH = 200 # Increased length slightly for paths
 LANGUAGE_PATTERNS = {'.py': re.compile(r'\b(def|class|import|from|if|else|elif|for|while|try|except|print)\b', re.MULTILINE), '.js': re.compile(r'\b(function|var|let|const|if|else|for|while|document|window|console\.log)\b', re.MULTILINE), '.html': re.compile(r'<(!DOCTYPE html|html|head|body|div|p|a|img|script|style)\b', re.IGNORECASE | re.MULTILINE), '.css': re.compile(r'[{};]\s*([a-zA-Z-]+)\s*:', re.MULTILINE), '.json': re.compile(r'^\s*\{.*\}\s*$|^\s*\[.*\]\s*$', re.DOTALL), '.md': re.compile(r'^#+\s|\*\*|\*|_|`|> |-', re.MULTILINE), '.sql': re.compile(r'\b(SELECT|INSERT|UPDATE|DELETE|CREATE|TABLE|FROM|WHERE|JOIN)\b', re.IGNORECASE | re.MULTILINE), '.xml': re.compile(r'<(\?xml|!DOCTYPE|[a-zA-Z:]+)', re.MULTILINE)}
 DEFAULT_EXTENSION = '.txt'; AUTO_RUN_ON_SYNTAX_OK = True
 
 # --- Helper Functions ---
 def sanitize_filename(filename: str) -> str | None:
-    if not filename or filename.isspace(): return None
-    if '..' in filename or filename.startswith('/') or filename.startswith('\\'): print(f"W: Reject unsafe pattern: {filename}", file=sys.stderr); return None
-    filename = os.path.basename(filename)
-    if filename.startswith('.'): print(f"W: Reject hidden file: {filename}", file=sys.stderr); return None
+    """
+    Cleans a filename/path extracted from the code marker.
+    - Removes leading/trailing whitespace.
+    - Rejects paths starting with '/' or containing '..'.
+    - Rejects filenames starting with '.' (hidden files).
+    - Replaces potentially unsafe characters (excluding '/') with underscores.
+    - Enforces max length.
+    - Ensures it has a plausible extension.
+    - Returns the sanitized relative path or None if invalid.
+    """
+    if not filename: return None
+    filename = filename.strip()
+    if not filename: return None
+
+    # Security checks
+    if filename.startswith('/') or filename.startswith('\\') or '..' in filename.split(os.path.sep):
+        print(f"W: Rejected potentially unsafe path pattern: {filename}", file=sys.stderr)
+        return None
+    basename = os.path.basename(filename)
+    if basename.startswith('.'):
+        print(f"W: Rejected path ending in hidden file: {filename}", file=sys.stderr)
+        return None
+
+    # Sanitize characters (allow '/')
     sanitized = FILENAME_SANITIZE_REGEX.sub('_', filename)
+
+    # Enforce max length
     if len(sanitized) > MAX_FILENAME_LENGTH:
+        print(f"W: Filename too long, truncating: {sanitized}", file=sys.stderr)
+        # Basic truncation, might need smarter logic for paths
+        sanitized = sanitized[:MAX_FILENAME_LENGTH]
+        # Try to preserve extension if possible after truncation
         base, ext = os.path.splitext(sanitized)
-        if len(ext) > (MAX_FILENAME_LENGTH - 2): ext = ext[:MAX_FILENAME_LENGTH - 2] + "~"
-        base = base[:MAX_FILENAME_LENGTH - len(ext) - 1]; sanitized = f"{base}{ext}"
-    if not os.path.splitext(sanitized)[0] and len(sanitized) <= 1: return None
-    base, ext = os.path.splitext(sanitized)
-    if not ext or len(ext) < 2: print(f"W: Sanitized '{sanitized}' lacks ext. Appending .txt", file=sys.stderr); sanitized += ".txt"
+        original_base, original_ext = os.path.splitext(filename)
+        if original_ext and not ext:
+             sanitized = base + original_ext # Re-add original extension if truncated off
+
+    # Ensure it has a plausible extension
+    _ , file_ext = os.path.splitext(sanitized)
+    if not file_ext or len(file_ext) < 2:
+        print(f"W: Sanitized path '{sanitized}' lacks a proper extension. Appending .txt", file=sys.stderr)
+        sanitized += ".txt"
+
+    # Final check for empty name after sanitization
+    if not os.path.splitext(os.path.basename(sanitized))[0]:
+         print(f"W: Sanitized filename part is empty: {sanitized}", file=sys.stderr)
+         return None
+
     return sanitized
 
 def detect_language_and_extension(code: str) -> tuple[str, str]:
@@ -79,65 +122,83 @@ def generate_timestamped_filepath(extension: str = '.txt', base_prefix="code"):
     if not safe_base_prefix: safe_base_prefix = "code"
     while True:
         filename = f"{safe_base_prefix}_{today}_{counter:03d}{extension}"
-        filepath = SAVE_FOLDER_PATH / filename
-        if not filepath.exists(): return str(filepath)
+        filepath = SAVE_FOLDER_PATH / filename # Use Path object directly
+        if not filepath.exists(): return str(filepath) # Return path as string
         counter += 1
 
 def is_git_repository() -> bool:
+    """Checks if SERVER_DIR is part of a Git repository."""
     try:
         result = subprocess.run(['git', 'rev-parse', '--git-dir'], capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR)
         is_repo = result.returncode == 0
         if not is_repo: print("Info: Not running inside a Git repository.", file=sys.stderr)
         return is_repo
-    except FileNotFoundError: return False
+    except FileNotFoundError: print("W: 'git' command not found.", file=sys.stderr); return False
     except Exception as e: print(f"E: checking Git repository: {e}", file=sys.stderr); return False
 
 def is_git_tracked(filepath_relative_to_repo: str) -> bool:
+    """Checks if a specific file is tracked by Git relative to SERVER_DIR."""
     if not IS_REPO: return False
     try:
-        git_path = Path(filepath_relative_to_repo).as_posix(); command = ['git', 'ls-files', '--error-unmatch', git_path]
+        git_path = Path(filepath_relative_to_repo).as_posix() # Use forward slashes for Git
+        command = ['git', 'ls-files', '--error-unmatch', git_path]
+        # Run from the server directory (assumed repo root)
         print(f"Running: {' '.join(command)} from {SERVER_DIR}", file=sys.stderr)
         result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR)
         is_tracked = result.returncode == 0
         print(f"Info: Git track status for '{git_path}': {is_tracked}", file=sys.stderr)
         if result.returncode != 0 and result.stderr: print(f"Info: git ls-files stderr: {result.stderr.strip()}", file=sys.stderr)
         return is_tracked
-    except Exception as e: print(f"E: checking Git track status: {e}", file=sys.stderr); return False
+    except Exception as e: print(f"E: checking Git track status for '{filepath_relative_to_repo}': {e}", file=sys.stderr); return False
 
 def update_and_commit_file(filepath_absolute: Path, code_content: str, marker_filename: str) -> bool:
+    """Overwrites, adds, and commits a file using Git, relative to SERVER_DIR."""
     if not IS_REPO: return False
     try:
-        filepath_relative_to_repo = str(filepath_absolute.relative_to(SERVER_DIR)); git_path_posix = filepath_absolute.relative_to(SERVER_DIR).as_posix()
-        print(f"Overwriting local file: {filepath_relative_to_repo}", file=sys.stderr)
+        # Get the path relative to the repo root (SERVER_DIR) for Git commands
+        filepath_relative_to_repo_str = str(filepath_absolute.relative_to(SERVER_DIR))
+        git_path_posix = filepath_absolute.relative_to(SERVER_DIR).as_posix() # POSIX for command
+
+        print(f"Overwriting local file: {filepath_relative_to_repo_str}", file=sys.stderr)
+        filepath_absolute.parent.mkdir(parents=True, exist_ok=True) # Ensure directory exists
         filepath_absolute.write_text(code_content, encoding='utf-8')
+
         print(f"Running: git add '{git_path_posix}' from {SERVER_DIR}", file=sys.stderr)
         add_result = subprocess.run(['git', 'add', git_path_posix], capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR)
         if add_result.returncode != 0: print(f"E: 'git add' failed:\n{add_result.stderr}", file=sys.stderr); return False
+
         commit_message = f"Update {marker_filename} from AI Code Capture"
         print(f"Running: git commit -m \"{commit_message}\" from {SERVER_DIR}", file=sys.stderr)
         commit_result = subprocess.run(['git', 'commit', '-m', commit_message], capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR)
+
         if commit_result.returncode != 0:
-            if "nothing to commit" in commit_result.stdout or "no changes added to commit" in commit_result.stdout or "nothing added to commit" in commit_result.stdout:
+            no_changes_patterns = ["nothing to commit", "no changes added to commit", "nothing added to commit"]
+            commit_output = commit_result.stdout + commit_result.stderr
+            if any(pattern in commit_output for pattern in no_changes_patterns):
                 print("Info: No changes detected by Git for commit.", file=sys.stderr); return True
             else: print(f"E: 'git commit' failed:\n{commit_result.stderr}", file=sys.stderr); return False
-        print(f"Successfully committed changes for {filepath_relative_to_repo}.", file=sys.stderr)
+
+        print(f"Successfully committed changes for {filepath_relative_to_repo_str}.", file=sys.stderr)
         return True
     except IOError as e: print(f"E: writing file {filepath_absolute}: {e}", file=sys.stderr); return False
-    except Exception as e: print(f"E: during Git update/commit: {e}", file=sys.stderr); return False
+    except Exception as e: print(f"E: during Git update/commit for {filepath_absolute}: {e}", file=sys.stderr); return False
+
 
 IS_REPO = is_git_repository()
 
 def run_script(filepath):
     filepath_obj = Path(filepath); filename_base = filepath_obj.stem
-    logpath = LOG_FOLDER_PATH / f"{filename_base}.log"
+    logpath = LOG_FOLDER_PATH / f"{filename_base}.log" # Use LOG_FOLDER_PATH
     try:
         python_exe = sys.executable
-        print(f"Executing: {python_exe} {filepath} in {filepath_obj.parent}", file=sys.stderr)
+        # Run the script from its own directory to handle relative paths within the script correctly
+        run_cwd = filepath_obj.parent
+        print(f"Executing: {python_exe} {filepath_obj.name} in {run_cwd}", file=sys.stderr)
         result = subprocess.run(
-            [python_exe, filepath], capture_output=True, text=True, timeout=10,
-            encoding='utf-8', check=False, cwd=filepath_obj.parent
+            [python_exe, filepath_obj.name], capture_output=True, text=True, timeout=10,
+            encoding='utf-8', check=False, cwd=run_cwd
         )
-        os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
+        os.makedirs(LOG_FOLDER_PATH, exist_ok=True) # Ensure log folder exists
         with open(logpath, 'w', encoding='utf-8') as f: f.write(f"--- STDOUT ---\n{result.stdout}\n--- STDERR ---\n{result.stderr}\n--- Return Code: {result.returncode} ---\n")
         print(f"Exec finished. RC: {result.returncode}. Log: {logpath.name}", file=sys.stderr)
         return result.returncode == 0, str(logpath)
@@ -152,102 +213,147 @@ def run_script(filepath):
         with open(logpath, 'w', encoding='utf-8') as f: f.write(f"Error running script: {str(e)}\n")
         return False, str(logpath)
 
+
+# --- Route Definitions ---
 @app.route('/submit_code', methods=['POST', 'OPTIONS'])
 def submit_code():
-    if request.method == 'OPTIONS': return '', 204
+    if request.method == 'OPTIONS': return '', 204 # Preflight
+
     if request.method == 'POST':
-        data = request.get_json();
+        data = request.get_json()
         if not data: return jsonify({'status': 'error', 'message': 'No JSON data received'}), 400
-        received_code = data.get('code', '');
+        received_code = data.get('code', '')
         if not received_code or received_code.isspace(): return jsonify({'status': 'error', 'message': 'Empty code received'}), 400
 
-        save_filepath_str = None; final_save_filename = None; code_to_process = received_code
-        extracted_filename_raw = None; detected_language_name = "Unknown"
-        marker_line_length = 0; was_git_updated = False; sanitized_basename = None
+        save_filepath_str = None
+        final_save_filename = None
+        code_to_save = received_code # Default to saving original code
+        extracted_filename_raw = None
+        detected_language_name = "Unknown"
+        was_git_updated = False
+        sanitized_relative_path = None
+        save_target = "fallback" # 'git' or 'fallback'
 
         match = FILENAME_EXTRACT_REGEX.search(received_code)
         if match:
-            extracted_filename_raw = match.group(1).strip(); marker_line_length = match.end()
-            if marker_line_length < len(received_code) and received_code[marker_line_length] == '\n': marker_line_length += 1
+            extracted_filename_raw = match.group(1).strip()
             print(f"Found marker: '{extracted_filename_raw}'", file=sys.stderr)
-            sanitized_basename = sanitize_filename(extracted_filename_raw)
-            if sanitized_basename:
-                if EXTENSION_SUBDIR and sanitized_basename != THIS_SCRIPT_NAME:
-                     git_check_path_relative = str(Path(EXTENSION_SUBDIR) / sanitized_basename); absolute_path_for_commit = EXTENSION_DIR_PATH / sanitized_basename
-                else: git_check_path_relative = sanitized_basename; absolute_path_for_commit = SERVER_DIR / sanitized_basename
-                print(f"Checking Git track: '{git_check_path_relative}'", file=sys.stderr)
-                is_tracked = is_git_tracked(git_check_path_relative)
-                if is_tracked:
-                    print(f"File '{git_check_path_relative}' is tracked. Committing.", file=sys.stderr)
-                    code_to_process = received_code[marker_line_length:]
-                    commit_success = update_and_commit_file(absolute_path_for_commit, code_to_process, extracted_filename_raw)
-                    if commit_success: save_filepath_str = str(absolute_path_for_commit); final_save_filename = sanitized_basename; was_git_updated = True; print(f"Git OK: {final_save_filename}", file=sys.stderr)
-                    else: print(f"W: Git commit failed for {git_check_path_relative}. Saving to '{SAVE_FOLDER}'.", file=sys.stderr); sanitized_basename = None # Force fallback
-                else: print(f"Info: File '{git_check_path_relative}' not tracked. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
-            else: print(f"W: Invalid extracted filename '{extracted_filename_raw}'. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
-        else: print("Info: No filename marker found. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
+            sanitized_relative_path = sanitize_filename(extracted_filename_raw)
 
-        if not was_git_updated:
-            code_to_process = received_code
-            if sanitized_basename:
-                 base, ext = os.path.splitext(sanitized_basename)
-                 save_filepath_str = generate_timestamped_filepath(extension=ext, base_prefix=base)
-                 print(f"Using generated path (untracked marker): '{save_filepath_str}'", file=sys.stderr)
+            if sanitized_relative_path:
+                print(f"Sanitized relative path: '{sanitized_relative_path}'", file=sys.stderr)
+                # Check if this exact relative path is tracked by Git from SERVER_DIR
+                is_tracked = is_git_tracked(sanitized_relative_path)
+
+                if is_tracked:
+                    absolute_path_for_commit = (SERVER_DIR / sanitized_relative_path).resolve()
+                    # Ensure the resolved path is still within the server directory (security)
+                    if not str(absolute_path_for_commit).startswith(str(SERVER_DIR)):
+                         print(f"W: Resolved path '{absolute_path_for_commit}' is outside server directory. Blocking Git update.", file=sys.stderr)
+                         sanitized_relative_path = None # Force fallback
+                    else:
+                        print(f"File '{sanitized_relative_path}' is tracked. Preparing commit to '{absolute_path_for_commit}'.", file=sys.stderr)
+                        # Remove the marker line *before* saving/committing
+                        marker_end_pos = match.end()
+                        if marker_end_pos < len(received_code) and received_code[marker_end_pos] == '\n': marker_end_pos += 1
+                        code_to_save = received_code[marker_line_length:] # Update code to save/process
+
+                        commit_success = update_and_commit_file(absolute_path_for_commit, code_to_save, extracted_filename_raw)
+                        if commit_success:
+                            save_filepath_str = str(absolute_path_for_commit)
+                            final_save_filename = sanitized_relative_path # Use the relative path as the "name"
+                            was_git_updated = True
+                            save_target = "git"
+                            print(f"Git update successful for {final_save_filename}", file=sys.stderr)
+                        else:
+                            print(f"W: Git commit failed for {sanitized_relative_path}. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
+                            sanitized_relative_path = None # Force fallback save
+                            code_to_save = received_code # Revert to original code for saving
+                else:
+                    print(f"Info: File '{sanitized_relative_path}' from marker not tracked by Git. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
+                    # Keep sanitized_relative_path to use its name/ext for fallback filename
+                    code_to_save = received_code # Save original code with marker
             else:
-                 detected_ext, detected_language_name = detect_language_and_extension(received_code)
+                print(f"W: Invalid extracted filename '{extracted_filename_raw}'. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
+                code_to_save = received_code # Save original code
+        else:
+             print("Info: No filename marker found. Saving to '{SAVE_FOLDER}'.", file=sys.stderr)
+             code_to_save = received_code # Save original code
+
+        # --- Fallback Save Logic ---
+        if save_target == "fallback":
+            if sanitized_relative_path: # Marker was present but file wasn't tracked or commit failed
+                 base, ext = os.path.splitext(sanitized_relative_path)
+                 base_prefix = os.path.basename(base) # Use just the filename part as prefix
+                 save_filepath_str = generate_timestamped_filepath(extension=ext, base_prefix=base_prefix)
+                 detected_language_name = "From Marker" # Indicate source of extension
+                 print(f"Using generated path (from untracked marker): '{save_filepath_str}'", file=sys.stderr)
+            else: # No valid marker found at all
+                 detected_ext, detected_language_name = detect_language_and_extension(code_to_save)
                  base_prefix = detected_language_name.lower().replace(" ", "_")
                  save_filepath_str = generate_timestamped_filepath(extension=detected_ext, base_prefix=base_prefix)
                  print(f"Using language detection path: '{save_filepath_str}'", file=sys.stderr)
+
             final_save_filename = os.path.basename(save_filepath_str)
             try:
                 os.makedirs(SAVE_FOLDER_PATH, exist_ok=True)
-                with open(save_filepath_str, 'w', encoding='utf-8') as f: f.write(code_to_process)
+                with open(save_filepath_str, 'w', encoding='utf-8') as f: f.write(code_to_save) # Save original or marker-less code
                 print(f"Code saved successfully to {save_filepath_str}", file=sys.stderr)
             except Exception as e: return jsonify({'status': 'error', 'message': f'Failed to save fallback file: {str(e)}'}), 500
 
+        # --- Process the code (Syntax check / Run) ---
+        # Check the final saved filename (could be relative like 'extension/popup.html' or timestamped)
         is_likely_python = final_save_filename.lower().endswith('.py')
         syntax_ok = None; run_success = None; log_filename = None
 
+        # Only check/run if it's Python AND NOT the server script itself
         if is_likely_python and final_save_filename != THIS_SCRIPT_NAME:
             print(f"File '{final_save_filename}' is Python, performing checks.", file=sys.stderr)
             try:
-                compile(code_to_process, save_filepath_str, 'exec')
+                # Compile the code content that was *actually saved* to the file
+                # (which is 'code_to_save', potentially with marker removed if Git commit happened)
+                compile(code_to_save, save_filepath_str, 'exec')
                 syntax_ok = True; print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
                 if AUTO_RUN_ON_SYNTAX_OK:
                     print(f"Attempting to run {final_save_filename}", file=sys.stderr)
-                    run_success, logpath = run_script(save_filepath_str)
-                    log_filename = os.path.basename(logpath) if logpath else None
+                    run_success, logpath = run_script(save_filepath_str) # Run the saved file
+                    log_filename = Path(logpath).name if logpath else None
                     print(f"Script run completed. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
             except SyntaxError as e:
                 syntax_ok = False; print(f"Syntax Error: L{e.lineno} C{e.offset} {e.msg}", file=sys.stderr)
                 log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_syntax_error.log"; marker = extracted_filename_raw or 'None'
                 try:
-                    # *** CORRECTED INDENTATION START ***
                     os.makedirs(LOG_FOLDER_PATH, exist_ok=True);
-                    with open(log_path_err, 'w', encoding='utf-8') as f:
-                        f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {marker})\nLine: {e.lineno}, Offset: {e.offset}\nMsg: {e.msg}\nCtx:\n{e.text}")
+                    with open(log_path_err, 'w', encoding='utf-8') as f: f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {marker})\nLine: {e.lineno}, Offset: {e.offset}\nMsg: {e.msg}\nCtx:\n{e.text}")
                     log_filename = log_path_err.name
-                    # *** CORRECTED INDENTATION END ***
                 except Exception as log_e: print(f"E: writing syntax error log: {log_e}", file=sys.stderr)
             except Exception as compile_e:
                 syntax_ok = False; run_success = False; print(f"Compile/run setup error: {compile_e}", file=sys.stderr)
                 log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_compile_error.log"; marker = extracted_filename_raw or 'None'
                 try:
-                    # *** CORRECTED INDENTATION START ***
                     os.makedirs(LOG_FOLDER_PATH, exist_ok=True);
-                    with open(log_path_err, 'w', encoding='utf-8') as f:
-                        f.write(f"Compile/Run Setup Error:\nFile: {final_save_filename} (Marker: {marker})\nError: {compile_e}\n")
+                    with open(log_path_err, 'w', encoding='utf-8') as f: f.write(f"Compile/Run Setup Error:\nFile: {final_save_filename} (Marker: {marker})\nError: {compile_e}\n")
                     log_filename = log_path_err.name
-                    # *** CORRECTED INDENTATION END ***
                 except Exception as log_e: print(f"E: writing compile error log: {log_e}", file=sys.stderr)
         elif is_likely_python and final_save_filename == THIS_SCRIPT_NAME:
              print(f"Skipping run for server script itself: '{final_save_filename}'.", file=sys.stderr)
-             try: compile(code_to_process, save_filepath_str, 'exec'); syntax_ok = True; print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
+             try: compile(code_to_save, save_filepath_str, 'exec'); syntax_ok = True; print(f"Syntax OK for {final_save_filename}", file=sys.stderr)
              except SyntaxError as e: syntax_ok = False; print(f"Syntax Error: L{e.lineno} C{e.offset} {e.msg}", file=sys.stderr)
              except Exception as compile_e: syntax_ok = False; print(f"Compile check error: {compile_e}", file=sys.stderr)
         else: print(f"File '{final_save_filename}' is not Python, skipping checks.", file=sys.stderr)
 
-        response_data = {'status': 'success', 'saved_as': final_save_filename, 'log_file': log_filename, 'syntax_ok': syntax_ok, 'run_success': run_success, 'source_file_marker': extracted_filename_raw, 'git_updated': was_git_updated, 'detected_language': detected_language_name if not extracted_filename_raw else None}
+        # --- Return Response ---
+        response_data = {
+            'status': 'success',
+            'saved_as': final_save_filename, # Could be relative Git path or timestamped name
+            'log_file': log_filename,
+            'syntax_ok': syntax_ok,
+            'run_success': run_success,
+            'source_file_marker': extracted_filename_raw, # Original marker value
+            'git_updated': was_git_updated,
+            'save_location': "git" if was_git_updated else "received_codes", # Indicate where it ended up
+            'detected_language': detected_language_name if not extracted_filename_raw else None
+        }
         print(f"Sending response: {response_data}", file=sys.stderr)
         return jsonify(response_data)
 
@@ -267,23 +373,33 @@ def list_logs():
 def serve_log(filename):
     print(f"Request received for log file: {filename}", file=sys.stderr)
     log_dir = LOG_FOLDER_PATH.resolve(); requested_path = (log_dir / filename).resolve()
-    if not str(requested_path).startswith(str(log_dir)) or '..' in filename: return "Forbidden", 403
+    # Security check: Ensure resolved path is still within the intended log directory
+    if not str(requested_path).startswith(str(log_dir)): return "Forbidden", 403
+    # Basic check for path traversal components in the *original* filename request
+    if '..' in filename or filename.startswith('/') or filename.startswith('\\'): return "Forbidden", 403
     try: return send_from_directory(LOG_FOLDER_PATH, filename, mimetype='text/plain', as_attachment=False)
     except FileNotFoundError: return "Log file not found", 404
     except Exception as e: print(f"Error serving log file {filename}: {e}", file=sys.stderr); return "Error serving file", 500
 
 if __name__ == '__main__':
-    host_ip = '127.0.0.1'
-    port_num = SERVER_PORT
+    host_ip = '127.0.0.1'; port_num = SERVER_PORT
     print(f"Starting Flask server on http://{host_ip}:{port_num}", file=sys.stderr)
+    print(f"Server Directory (Repo Root): {SERVER_DIR}", file=sys.stderr)
     print(f"Saving non-Git files to: {SAVE_FOLDER_PATH}", file=sys.stderr)
     print(f"Saving logs to: {LOG_FOLDER_PATH}", file=sys.stderr)
-    print(f"Assuming extension files live in: {EXTENSION_DIR_PATH}", file=sys.stderr)
     print(f"This script name: {THIS_SCRIPT_NAME}", file=sys.stderr)
     print("Will use filename from '@@FILENAME@@' marker if present and valid.", file=sys.stderr)
     if IS_REPO: print("Git integration ENABLED. Will update tracked files and commit.")
     else: print("Git integration DISABLED (Not in a Git repo or git command failed).")
     print("Will attempt language detection for fallback filename extensions.", file=sys.stderr)
     print("*** CORS enabled for all origins ***")
-    app.run(host=host_ip, port=port_num, debug=False)
-# No END OF FILE marker here
+    try:
+        app.run(host=host_ip, port=port_num, debug=False)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print(f"\nError: Address already in use.\nPort {port_num} is in use by another program. Either identify and stop that program, or start the server with a different port using the -p flag.", file=sys.stderr)
+            print(f"Example: python {THIS_SCRIPT_NAME} -p {port_num + 1}\n", file=sys.stderr)
+            sys.exit(1)
+        else:
+            raise # Reraise other OS errors
+# --- END OF FILE server.py ---
