@@ -1,4 +1,3 @@
-# @@FILENAME@@ server.py
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 from flask_cors import CORS
 import os
@@ -31,38 +30,29 @@ THIS_SCRIPT_NAME = Path(__file__).name
 os.makedirs(SAVE_FOLDER_PATH, exist_ok=True)
 os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
 
-# --- Regex & Constants ---
+# --- Regex & Constants (Unchanged) ---
 FILENAME_EXTRACT_REGEX = re.compile(r"^\s*(?://|#)\s*@@FILENAME@@\s+(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 FILENAME_SANITIZE_REGEX = re.compile(r'[^a-zA-Z0-9._\-\/]')
 MAX_FILENAME_LENGTH = 200
 LANGUAGE_PATTERNS = {'.py': re.compile(r'\b(def|class|import|from|if|else|elif|for|while|try|except|print)\b', re.MULTILINE), '.js': re.compile(r'\b(function|var|let|const|if|else|for|while|document|window|console\.log)\b', re.MULTILINE), '.html': re.compile(r'<(!DOCTYPE html|html|head|body|div|p|a|img|script|style)\b', re.IGNORECASE | re.MULTILINE), '.css': re.compile(r'[{};]\s*([a-zA-Z-]+)\s*:', re.MULTILINE), '.json': re.compile(r'^\s*\{.*\}\s*$|^\s*\[.*\]\s*$', re.DOTALL), '.md': re.compile(r'^#+\s|\*\*|\*|_|`|> |-', re.MULTILINE), '.sql': re.compile(r'\b(SELECT|INSERT|UPDATE|DELETE|CREATE|TABLE|FROM|WHERE|JOIN)\b', re.IGNORECASE | re.MULTILINE), '.xml': re.compile(r'<(\?xml|!DOCTYPE|[a-zA-Z:]+)', re.MULTILINE)}
 DEFAULT_EXTENSION = '.txt'; AUTO_RUN_ON_SYNTAX_OK = True
 
-# --- Helper Functions ---
+# --- Helper Functions (Unchanged) ---
 def sanitize_filename(filename: str) -> str | None:
     if not filename or filename.isspace(): return None
     filename = filename.strip()
-    if filename.startswith(('/', '\\')) or '..' in Path(filename).parts:
-        print(f"W: Rejected potentially unsafe path pattern: {filename}", file=sys.stderr)
-        return None
+    if filename.startswith(('/', '\\')) or '..' in Path(filename).parts: print(f"W: Rejected potentially unsafe path pattern: {filename}", file=sys.stderr); return None
     basename = os.path.basename(filename)
-    if basename.startswith('.'):
-        print(f"W: Rejected path ending in hidden file: {filename}", file=sys.stderr)
-        return None
+    if basename.startswith('.'): print(f"W: Rejected path ending in hidden file: {filename}", file=sys.stderr); return None
     sanitized = FILENAME_SANITIZE_REGEX.sub('_', filename)
     if len(sanitized) > MAX_FILENAME_LENGTH:
         print(f"W: Filename too long, might be truncated unexpectedly: {sanitized}", file=sys.stderr)
         sanitized = sanitized[:MAX_FILENAME_LENGTH]
-        base, ext = os.path.splitext(sanitized)
-        original_base, original_ext = os.path.splitext(filename)
+        base, ext = os.path.splitext(sanitized); original_base, original_ext = os.path.splitext(filename)
         if original_ext and not ext: sanitized = base + original_ext
     base, ext = os.path.splitext(os.path.basename(sanitized))
-    if not ext or len(ext) < 2:
-        print(f"W: Sanitized path '{sanitized}' lacks a proper extension. Appending .txt", file=sys.stderr)
-        sanitized += ".txt"
-    if not base:
-         print(f"W: Sanitized filename part is empty: {sanitized}", file=sys.stderr)
-         return None
+    if not ext or len(ext) < 2: print(f"W: Sanitized path '{sanitized}' lacks a proper extension. Appending .txt", file=sys.stderr); sanitized += ".txt"
+    if not base: print(f"W: Sanitized filename part is empty: {sanitized}", file=sys.stderr); return None
     return sanitized
 
 def detect_language_and_extension(code: str) -> tuple[str, str]:
@@ -169,14 +159,12 @@ def run_script(filepath):
     except subprocess.TimeoutExpired:
         print(f"E: Script timed out: {filepath}", file=sys.stderr)
         os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
-        with open(logpath, 'w', encoding='utf-8') as f:
-             f.write("Error: Script timed out after 10 seconds.\n")
+        with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Script timed out after 10 seconds.\n")
         return False, str(logpath)
     except Exception as e:
         print(f"E: running script {filepath}: {e}", file=sys.stderr)
         os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
-        with open(logpath, 'w', encoding='utf-8') as f:
-            f.write(f"Error running script: {str(e)}\n")
+        with open(logpath, 'w', encoding='utf-8') as f: f.write(f"Error running script: {str(e)}\n")
         return False, str(logpath)
 
 # --- Route Definitions ---
@@ -208,7 +196,7 @@ def submit_code():
                     print(f"Marker is basename only. Searching Git index...", file=sys.stderr)
                     found_rel_path = find_tracked_file_by_name(sanitized_path_from_marker)
                     if found_rel_path: git_path_to_check = found_rel_path
-                    else: print(f"No unique match for '{sanitized_path_from_marker}' in Git index. Fallback.", file=sys.stderr); git_path_to_check = None
+                    else: print(f"No unique match for '{sanitized_path_from_marker}'. Fallback.", file=sys.stderr); git_path_to_check = None
 
                 if git_path_to_check:
                     absolute_path_for_commit = (SERVER_DIR / git_path_to_check).resolve()
@@ -216,10 +204,10 @@ def submit_code():
                          print(f"W: Resolved path '{absolute_path_for_commit}' outside server dir. Blocking Git.", file=sys.stderr)
                          sanitized_path_from_marker = None
                     else:
-                        is_tracked = is_git_tracked(git_path_to_check) # Corrected function call placement
+                        is_tracked = is_git_tracked(git_path_to_check)
                         if is_tracked:
                             print(f"File '{git_path_to_check}' is tracked. Committing to '{absolute_path_for_commit}'.", file=sys.stderr)
-                            code_to_save = received_code[marker_line_length:]
+                            code_to_save = received_code[marker_line_length:] # Use code *without* marker
                             commit_success = update_and_commit_file(absolute_path_for_commit, code_to_save, extracted_filename_raw)
                             if commit_success: save_filepath_str = str(absolute_path_for_commit); final_save_filename = git_path_to_check; was_git_updated = True; save_target = "git"; print(f"Git OK: {final_save_filename}", file=sys.stderr)
                             else: print(f"W: Git commit failed for {git_path_to_check}. Saving to '{SAVE_FOLDER}'.", file=sys.stderr); sanitized_path_from_marker = git_path_to_check; code_to_save = received_code
@@ -254,8 +242,9 @@ def submit_code():
                 syntax_ok = False; print(f"Syntax Error: L{e.lineno} C{e.offset} {e.msg}", file=sys.stderr)
                 log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_syntax_error.log"; marker = extracted_filename_raw or 'None'
                 try: # Inner try for logging the syntax error
-                    os.makedirs(LOG_FOLDER_PATH, exist_ok=True);
-                    with open(log_path_err, 'w', encoding='utf-8') as f: f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {marker})\nLine: {e.lineno}, Offset: {e.offset}\nMsg: {e.msg}\nCtx:\n{e.text}")
+                    os.makedirs(LOG_FOLDER_PATH, exist_ok=True) # Ensure log folder exists
+                    with open(log_path_err, 'w', encoding='utf-8') as f:
+                        f.write(f"Syntax Error:\nFile: {final_save_filename} (Marker: {marker})\nLine: {e.lineno}, Offset: {e.offset}\nMsg: {e.msg}\nCtx:\n{e.text}")
                     log_filename = log_path_err.name
                 except Exception as log_e: # Catch errors specifically from logging
                      print(f"E: writing syntax error log: {log_e}", file=sys.stderr)
@@ -263,8 +252,9 @@ def submit_code():
                 syntax_ok = False; run_success = False; print(f"Compile/run setup error: {compile_e}", file=sys.stderr)
                 log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_compile_error.log"; marker = extracted_filename_raw or 'None'
                 try: # Inner try for logging the compile error
-                    os.makedirs(LOG_FOLDER_PATH, exist_ok=True);
-                    with open(log_path_err, 'w', encoding='utf-8') as f: f.write(f"Compile/Run Setup Error:\nFile: {final_save_filename} (Marker: {marker})\nError: {compile_e}\n")
+                    os.makedirs(LOG_FOLDER_PATH, exist_ok=True) # Ensure log folder exists
+                    with open(log_path_err, 'w', encoding='utf-8') as f:
+                        f.write(f"Compile/Run Setup Error:\nFile: {final_save_filename} (Marker: {marker})\nError: {compile_e}\n")
                     log_filename = log_path_err.name
                 except Exception as log_e: # Catch errors specifically from logging
                      print(f"E: writing compile error log: {log_e}", file=sys.stderr)
@@ -280,6 +270,19 @@ def submit_code():
         return jsonify(response_data)
 
     return jsonify({'status': 'error', 'message': f'Unsupported method: {request.method}'}), 405
+
+# --- NEW Test Connection Route ---
+@app.route('/test_connection', methods=['GET'])
+def test_connection():
+    """Simple endpoint to check if the server is running and return CWD."""
+    print("Received /test_connection request", file=sys.stderr)
+    try:
+        cwd = str(SERVER_DIR) # Get the resolved server directory path
+        return jsonify({'status': 'ok', 'message': 'Server is running.', 'working_directory': cwd})
+    except Exception as e:
+        print(f"Error getting working directory for test connection: {e}", file=sys.stderr)
+        return jsonify({'status': 'error', 'message': f'Server error: {str(e)}'}), 500
+
 
 # --- Log Routes (Unchanged) ---
 @app.route('/logs')
