@@ -1,13 +1,40 @@
-/* highlight.css */
-/* Style for the highlighted code block */
+/* @@FILENAME@@ highlight.css */
+/* Style for the initial highlight when code is detected */
 .aicapture-highlight {
   /* Use outline to avoid affecting layout, !important might be needed */
   outline: 3px solid #FFD700 !important; /* Bright yellow/gold outline */
-  outline-offset: 2px; /* Small space between element and outline */
-  background-color: rgba(255, 215, 0, 0.15) !important; /* Faint yellow background */
-  border-radius: 4px; /* Slightly rounded corners */
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6); /* Optional subtle glow */
+  outline-offset: 2px;
+  background-color: rgba(255, 215, 0, 0.15) !important;
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
 
-  /* Smooth transition for removal */
-  transition: outline 0.5s ease-out, background-color 0.5s ease-out, box-shadow 0.5s ease-out;
+  /* Smooth transition for removal or change */
+  transition: outline 0.5s ease-in-out, background-color 0.5s ease-in-out, box-shadow 0.5s ease-in-out;
+}
+
+/* Style for SUCCESSFUL processing (including successful Git commit if applicable) */
+.aicapture-success {
+  outline: 3px solid #28a745 !important; /* Green outline */
+  outline-offset: 2px;
+  background-color: rgba(40, 167, 69, 0.15) !important; /* Faint green background */
+  box-shadow: 0 0 12px rgba(40, 167, 69, 0.6);
+  border-radius: 4px;
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+}
+
+/* Style for FAILED processing (server error, syntax error, failed commit, etc.) */
+.aicapture-error {
+  outline: 3px solid #dc3545 !important; /* Red outline */
+  outline-offset: 2px;
+  background-color: rgba(220, 53, 69, 0.15) !important; /* Faint red background */
+  box-shadow: 0 0 12px rgba(220, 53, 69, 0.6);
+  border-radius: 4px;
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+}
+
+/* Style to REMOVE highlight smoothly (applied temporarily before removing class) */
+.aicapture-fadeout {
+    outline-color: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
 }
