@@ -1,4 +1,6 @@
-console.log("AI Code Capture content script loaded (v3 - Port aware).");
+'use strict';
+
+console.log("AI Code Capture content script loaded (v7 - Selector Fix & Debounce).");
 
 let isActivated = false;
 let serverPort = 5000; // Default, will be updated
@@ -10,6 +12,10 @@ const HIGHLIGHT_ID_ATTR = 'data-aicapture-id';
 const HIGHLIGHT_STATE_ATTR = 'data-aicapture-state'; // 'initial', 'success', 'error'
 const FADEOUT_DURATION_MS = 600; // Duration for fade-out effect
 const REMOVAL_DELAY_MS = 5000; // How long to keep success/error highlight before removing
+
+// Debounce timer
+let debounceTimeout;
+const DEBOUNCE_DELAY_MS = 750; // Increased delay to be safer
 
 // Session storage key for sent hashes (port-specific)
 let sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`;
@@ -30,18 +36,27 @@ function simpleHash(str) {
 
 function loadSentHashes() {
     sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`; // Update key based on current port
-    console.log("Attempting to load hashes for session key:", sessionKey); // Debug
+    sentHashes.clear(); // Clear existing hashes before loading for the new port
+    console.log("AICapture: Attempting to load hashes for session key:", sessionKey);
     try {
         const storedHashes = sessionStorage.getItem(sessionKey);
         if (storedHashes) {
-            sentHashes = new Set(JSON.parse(storedHashes));
-            console.log(`Loaded ${sentHashes.size} hashes for port ${serverPort} from sessionStorage.`); // Debug
+            const parsed = JSON.parse(storedHashes);
+            // Ensure it's actually an array before creating a Set
+            if (Array.isArray(parsed)) {
+                sentHashes = new Set(parsed);
+                console.log(`AICapture: Loaded ${sentHashes.size} hashes for port ${serverPort} from sessionStorage.`);
+            } else {
+                 console.warn(`AICapture: Invalid data in sessionStorage for key ${sessionKey}. Starting fresh.`);
+                 sessionStorage.removeItem(sessionKey); // Remove invalid data
+                 sentHashes = new Set();
+            }
         } else {
-            sentHashes = new Set(); // Start fresh if nothing stored for this port
-             console.log(`No hashes found in sessionStorage for port ${serverPort}.`); // Debug
+            sentHashes = new Set();
+             console.log(`AICapture: No hashes found in sessionStorage for port ${serverPort}.`);
         }
     } catch (e) {
-        console.error("Error loading or parsing sent hashes from sessionStorage:", e);
+        console.error("AICapture: Error loading or parsing sent hashes from sessionStorage:", e);
         sentHashes = new Set(); // Reset on error
     }
 }
@@ -50,9 +65,12 @@ function saveSentHash(hash) {
     if (sentHashes.has(hash)) return; // Don't re-add
     sentHashes.add(hash);
     try {
+        // Make sure sessionKey is up-to-date before saving
+        sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`;
         sessionStorage.setItem(sessionKey, JSON.stringify(Array.from(sentHashes)));
+        // console.log(`AICapture: Saved hash ${hash}. Total hashes for port ${serverPort}: ${sentHashes.size}`);
     } catch (e) {
-        console.error("Error saving sent hashes to sessionStorage:", e);
+        console.error("AICapture: Error saving sent hashes to sessionStorage:", e);
         // If storage fails, we might send duplicates on reload, but better than crashing
     }
 }
@@ -60,35 +78,39 @@ function saveSentHash(hash) {
 // --- Highlight Functions ---
 
 function applyHighlight(element, className, captureId) {
-    console.log(`Applying ${className} highlight to element ID: ${captureId}`, element); // Debug
+    if (!element) return;
+    console.log(`AICapture: Applying ${className} highlight to element ID: ${captureId}`, element);
     // Remove other highlight classes first
     element.classList.remove(HIGHLIGHT_CLASS, SUCCESS_CLASS, ERROR_CLASS, FADEOUT_CLASS);
     // Add the new class and the ID attribute
     element.classList.add(className);
     element.setAttribute(HIGHLIGHT_ID_ATTR, captureId);
-    if(className === HIGHLIGHT_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'initial');
-    if(className === SUCCESS_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'success');
-    if(className === ERROR_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'error');
-
+    if (className === HIGHLIGHT_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'initial');
+    if (className === SUCCESS_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'success');
+    if (className === ERROR_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'error');
 }
 
 function removeHighlight(element, delayMs = 0) {
     if (!element) return;
     const captureId = element.getAttribute(HIGHLIGHT_ID_ATTR);
-    // console.log(`Removing highlight for element ID: ${captureId} after delay ${delayMs}`); // Debug
+    // console.log(`AICapture: Scheduling highlight removal for element ID: ${captureId} after delay ${delayMs}`);
 
     setTimeout(() => {
-        if (element) { // Check if element still exists
-            element.classList.add(FADEOUT_CLASS); // Start fade-out transition
-            // After transition, remove all classes and attributes
-             setTimeout(() => {
-                 if (element) {
-                     element.classList.remove(HIGHLIGHT_CLASS, SUCCESS_CLASS, ERROR_CLASS, FADEOUT_CLASS);
-                     element.removeAttribute(HIGHLIGHT_ID_ATTR);
-                     element.removeAttribute(HIGHLIGHT_STATE_ATTR);
-                     // console.log(`Highlight fully removed for ID: ${captureId}`); // Debug
-                 }
-             }, FADEOUT_DURATION_MS);
+        if (element) { // Check if element still exists and hasn't been re-highlighted
+             const currentState = element.getAttribute(HIGHLIGHT_STATE_ATTR);
+             // Only fade out if it's still in a final state (success/error)
+            if (currentState === 'success' || currentState === 'error') {
+                 element.classList.add(FADEOUT_CLASS); // Start fade-out transition
+                 // After transition, remove all classes and attributes
+                 setTimeout(() => {
+                     if (element && element.classList.contains(FADEOUT_CLASS)) { // Check if it's still fading out
+                         element.classList.remove(HIGHLIGHT_CLASS, SUCCESS_CLASS, ERROR_CLASS, FADEOUT_CLASS);
+                         element.removeAttribute(HIGHLIGHT_ID_ATTR);
+                         element.removeAttribute(HIGHLIGHT_STATE_ATTR);
+                          console.log(`AICapture: Highlight fully removed for ID: ${captureId}`);
+                     }
+                 }, FADEOUT_DURATION_MS);
+            }
         }
     }, delayMs);
 }
@@ -98,54 +120,87 @@ function removeHighlight(element, delayMs = 0) {
 
 function processCodeBlock(blockElement) {
     if (!isActivated || !blockElement) return;
+    // Skip blocks within user input areas (heuristic, might need adjustment)
     if (blockElement.closest('.user-prompt-container')) {
-        // console.log("Skipping code block within user prompt."); // Debug
-        return; // Skip blocks that are part of the user's input
+        // console.log("AICapture: Skipping code block within user prompt.");
+        return;
     }
-    if (blockElement.getAttribute(HIGHLIGHT_ID_ATTR)) {
-        // console.log("Skipping already processed/highlighted block:", blockElement); // Debug
-        return; // Already processed or being processed
+    // Skip blocks already processed or actively being processed
+    if (blockElement.hasAttribute(HIGHLIGHT_ID_ATTR)) {
+        // console.log("AICapture: Skipping already processed/highlighted block:", blockElement);
+        return;
+    }
+    // Check if the block contains the required @@FILENAME@@ marker *at the start*
+    const codeContent = blockElement.textContent || '';
+    const trimmedContent = codeContent.trimStart(); // Remove leading whitespace only
+    const markerRegex = /^\s*(?:\/\/|#)\s*@@FILENAME@@/i; // Match marker at the beginning
+
+    if (!markerRegex.test(trimmedContent)) {
+        // console.log("AICapture: Skipping block without marker.", blockElement);
+        return; // Skip blocks that don't start with the marker
     }
 
-    const codeContent = blockElement.textContent || '';
-    const codeHash = simpleHash(codeContent);
+    const codeHash = simpleHash(codeContent); // Hash the *full* original content
 
     if (sentHashes.has(codeHash)) {
-        // console.log("Skipping already sent code block (hash match)."); // Debug
-        return; // Skip if already sent in this session for this port
+        // console.log("AICapture: Skipping already sent code block (hash match).");
+        return;
     }
 
     const captureId = `aicapture-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    console.log(` -> Found NEW block (ID: ${captureId}, Hash: ${codeHash}). Applying INITIAL highlight & sending...`); // Debug
+    console.log(`AICapture: Found NEW block (ID: ${captureId}, Hash: ${codeHash}). Applying INITIAL highlight & sending...`);
 
     applyHighlight(blockElement, HIGHLIGHT_CLASS, captureId);
-    saveSentHash(codeHash); // Mark as sent immediately
+    saveSentHash(codeHash); // Mark as sent immediately for this session/port
 
     // Send to background script
-    chrome.runtime.sendMessage({
+    browser.runtime.sendMessage({
         action: 'submitCode',
-        code: codeContent,
+        data: codeContent, // Send the full code content
         captureId: captureId // Send ID for mapping back
-    }, (response) => {
-         if (chrome.runtime.lastError) {
-             console.error("Error sending code to background:", chrome.runtime.lastError.message);
-              applyHighlight(blockElement, ERROR_CLASS, captureId); // Show error on block
-              removeHighlight(blockElement, REMOVAL_DELAY_MS);
-         } else {
-             // Optional: Handle immediate response from background if needed
-             // console.log("Background ack response:", response);
-         }
-    });
+    })
+    .then(response => {
+        console.log("AICapture: Received response from background for " + captureId + ": ", response); // Debug
+        if (!response) {
+            console.error("AICapture: Received empty response from background for " + captureId);
+            applyHighlight(blockElement, ERROR_CLASS, captureId);
+            removeHighlight(blockElement, REMOVAL_DELAY_MS);
+            return;
+        }
+
+        // Handle response and update highlight (Now expecting {success: boolean, details: {...}})
+        const finalClass = response.success ? SUCCESS_CLASS : ERROR_CLASS;
+        applyHighlight(blockElement, finalClass, captureId);
+        removeHighlight(blockElement, REMOVAL_DELAY_MS); // Remove highlight after delay
+
+        if (!response.success) {
+             console.error("AICapture: Server/Background reported error for " + captureId + ":", response.details?.message || response.details || 'Unknown error');
+        }
+    })
+    .catch(error => {
+         console.error(`AICapture: Error sending 'submitCode' message or processing response for ${captureId}:`, error);
+         // Apply error highlight directly if sending failed
+         applyHighlight(blockElement, ERROR_CLASS, captureId);
+         removeHighlight(blockElement, REMOVAL_DELAY_MS);
+     });
 }
 
+// Scans the targetNode (or document) for relevant code blocks and processes them
 function processAllCodeBlocks(targetNode) {
-    if (!isActivated) return;
-    console.log("Processing turns within target (Activated=" + isActivated + ", Port=" + serverPort + "): ", targetNode); // Debug
-    // Target code blocks within model responses more specifically
-    const codeBlocks = targetNode.querySelectorAll(
-        'ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code' // Target model responses
-    );
-    // console.log(`Found ${codeBlocks.length} potential code blocks.`); // Debug
+    if (!isActivated || !targetNode) return;
+    console.log("AICapture: processAllCodeBlocks running...");
+
+    // *** UPDATED SELECTOR *** targeting the div containing model class, then descendants
+    const selector = 'div.chat-turn-container.model ms-code-block code';
+    const codeBlocks = targetNode.querySelectorAll(selector);
+
+    console.log(`AICapture: Found ${codeBlocks.length} potential code blocks with selector "${selector}".`);
+    if (codeBlocks.length === 0 && targetNode === document) {
+        // If initial scan finds nothing, maybe try the older selector once as fallback?
+        // Or log a more specific warning. Let's just log for now.
+        console.warn(`AICapture: No code blocks found with primary selector. Structure might have changed.`);
+    }
+
     codeBlocks.forEach(processCodeBlock);
 }
 
@@ -155,112 +210,125 @@ function updateSettings(newSettings) {
     let settingsChanged = false;
     if (newSettings.isActivated !== undefined && newSettings.isActivated !== isActivated) {
         isActivated = newSettings.isActivated;
-        console.log("Activation status updated:", isActivated);
+        console.log("AICapture: Activation status updated:", isActivated);
         settingsChanged = true;
-        // If activating, maybe trigger a scan?
-        if(isActivated) {
-            console.log("Re-checking code blocks after activation.");
-            processAllCodeBlocks(document);
+        if (isActivated) {
+            console.log("AICapture: Re-checking code blocks after activation.");
+            // Optional: Introduce a small delay before processing to let UI settle
+            setTimeout(() => processAllCodeBlocks(document), 250);
         }
     }
     if (newSettings.port !== undefined && newSettings.port !== serverPort) {
         serverPort = newSettings.port;
-        console.log("Server port updated:", serverPort);
+        console.log("AICapture: Server port updated:", serverPort);
         loadSentHashes(); // Reload hashes for the new port
         settingsChanged = true;
     }
      if (settingsChanged) {
-         console.log("Content script settings updated. Current state: Activated=" + isActivated + ", Port=" + serverPort);
+         console.log("AICapture: Content script settings updated. Current state: Activated=" + isActivated + ", Port=" + serverPort);
      }
 }
 
-// --- Initial Load ---
-// Request initial settings from background script
-chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
-    if (chrome.runtime.lastError) {
-        console.error("Error getting initial settings:", chrome.runtime.lastError.message);
-        // Use defaults if background is unavailable on load
-        isActivated = DEFAULT_ACTIVATION;
-        serverPort = DEFAULT_PORT;
-    } else if (response) {
-         console.log("Content script initial state:", response); // Debug
-        updateSettings(response); // Update local state
-    }
-     loadSentHashes(); // Load hashes after getting the initial port
+// --- Initial Load and Observer Setup ---
 
-    // --- Mutation Observer Setup ---
-    // Select the node that contains the chat turns or code blocks
-    // This might need adjustment based on AI Studio's structure
-    const targetNode = document.querySelector('ms-chat-session') || document.body; // Fallback to body
-    if (!targetNode) {
-        console.error("AI Code Capture: Target node for MutationObserver not found.");
-        return;
-    }
-     console.log("Target node found: ", targetNode); // Debug
-
-    const config = { childList: true, subtree: true };
-
-    const callback = (mutationList, observer) => {
-        if (!isActivated) return; // Don't process if not active
-        for (const mutation of mutationList) {
-            if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach(node => {
-                    // Check if the added node itself is or contains a code block
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                         // Look for code blocks specifically within model responses
-                        const codeBlocks = node.querySelectorAll('ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code');
-                        if(codeBlocks.length > 0) {
-                            // console.log("MutationObserver detected added nodes containing code blocks:", node); // Debug
-                            codeBlocks.forEach(processCodeBlock);
-                        } else if (node.matches && node.matches('ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code')) {
-                             // console.log("MutationObserver detected added code block itself:", node); // Debug
-                             processCodeBlock(node);
-                        }
-                    }
-                });
+function initialize() {
+    console.log("AICapture: Initializing...");
+    // Request initial settings from background script
+    browser.runtime.sendMessage({ action: 'getSettings' })
+        .then(response => {
+            if (response) {
+                 console.log("AICapture: Received initial settings:", response);
+                 updateSettings(response);
+            } else {
+                 console.warn("AICapture: No initial settings received from background, using defaults.");
+                 isActivated = true; // Default activation
+                 serverPort = 5000; // Default port
             }
-            // We could also observe attribute changes if needed, but childList is primary
-        }
-    };
+            loadSentHashes(); // Load hashes *after* getting the initial port
 
-    const observer = new MutationObserver(callback);
-    try {
-        console.log("Setting up MutationObserver."); // Debug
-        observer.observe(targetNode, config);
-         console.log("MutationObserver observing."); // Debug
-    } catch (error) {
-        console.error("Failed to start MutationObserver:", error);
-    }
+             // --- Mutation Observer Setup ---
+            const targetNode = document.querySelector('ms-chat-session') || document.body; // Monitor chat session or fallback to body
+            if (!targetNode) {
+                console.error("AICapture: Target node for MutationObserver not found.");
+                return;
+            }
+             console.log("AICapture: Target node found: ", targetNode);
 
-    // Initial check in case code is already present
-    console.log("Checking for initial code on page load..."); // Debug
-    if (isActivated) {
-        processAllCodeBlocks(document); // Scan the whole document initially
-    } else {
-        console.log("Initial check skipped, extension not activated."); // Debug
-    }
+            const config = { childList: true, subtree: true };
 
-}); // End of initial settings request
+            const callback = (mutationList, observer) => {
+                 // Check if still activated on mutation
+                 if (!isActivated) return;
+
+                 // Use debouncing to avoid rapid processing during streaming
+                 clearTimeout(debounceTimeout);
+                 console.log("AICapture: Mutation detected, setting debounce timer..."); // Debug
+                 debounceTimeout = setTimeout(() => {
+                    console.log("AICapture: Debounce timer fired, running processAllCodeBlocks."); // Debug
+                     processAllCodeBlocks(targetNode); // Process blocks within the target area after debounce
+                 }, DEBOUNCE_DELAY_MS);
+            };
+
+            const observer = new MutationObserver(callback);
+            try {
+                 console.log("AICapture: Setting up MutationObserver.");
+                 observer.observe(targetNode, config);
+                 console.log("AICapture: MutationObserver observing.");
+            } catch (error) {
+                 console.error("AICapture: Failed to start MutationObserver:", error);
+            }
+
+            // Initial check after a small delay for page elements to render
+            console.log("AICapture: Scheduling initial check...");
+            setTimeout(() => {
+                 console.log("AICapture: Running initial check.");
+                 if (isActivated) {
+                      processAllCodeBlocks(document); // Scan the whole document initially
+                 } else {
+                      console.log("AICapture: Initial check skipped, extension not activated.");
+                 }
+             }, 1500); // Delay initial check slightly more
+
+        })
+        .catch(error => {
+            console.error("AICapture: Error getting initial settings:", error.message);
+            // Use defaults if background is unavailable on load
+            isActivated = true;
+            serverPort = 5000;
+             loadSentHashes(); // Load with default port
+            // Still try to set up observer
+             initializeObserver(); // TODO: Refactor observer setup into a function if needed here
+        });
+}
 
 
 // --- Listen for Messages from Background Script ---
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // console.log("CONTENT SCRIPT: Received message:", message); // Debug
-    if (message.action === 'serverProcessingComplete') {
-        console.log("CONTENT SCRIPT: Received 'serverProcessingComplete'", message); // Debug
-        const element = document.querySelector(`[${HIGHLIGHT_ID_ATTR}="${message.captureId}"]`);
-        if (element) {
-            console.log(`Found element ID ${message.captureId}, applying final highlight (Success: ${message.success})`); // Debug
-            const finalClass = message.success ? SUCCESS_CLASS : ERROR_CLASS;
-            applyHighlight(element, finalClass, message.captureId);
-            removeHighlight(element, REMOVAL_DELAY_MS); // Remove highlight after delay
-        } else {
-            console.warn(`Content Script: Element with capture ID ${message.captureId} not found for final highlight.`);
-        }
-         // Optional: Send response back to background if needed
-         // sendResponse({status: "Highlight updated"});
-    } else if (message.action === 'settingsUpdated') {
-        console.log("Content Script: Received 'settingsUpdated'", message.newSettings); // Debug
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // console.log("AICapture: Received message:", message); // Can be noisy, enable if needed
+
+    // The 'submitCode' action response is now handled within the .then() of the sendMessage call in processCodeBlock
+
+    if (message.action === 'settingsUpdated') {
+        console.log("AICapture: Received 'settingsUpdated'", message.newSettings);
         updateSettings(message.newSettings);
+    } else if (message.action === 'serverProcessingComplete') {
+         // This handler might be redundant now as the response is handled in the processCodeBlock promise chain.
+         // Keep it for now as a fallback or for potential future use cases.
+         console.warn("AICapture: Received unexpected 'serverProcessingComplete' message directly (should be handled by originating promise).");
+         const element = document.querySelector(`[${HIGHLIGHT_ID_ATTR}="${message.captureId}"]`);
+         if (element) {
+             const finalClass = message.success ? SUCCESS_CLASS : ERROR_CLASS;
+             applyHighlight(element, finalClass, message.captureId);
+             removeHighlight(element, REMOVAL_DELAY_MS);
+         }
     }
+
+    // Indicate sync processing or that no async response is needed from this top-level listener
+    // unless specifically required for a message type not handled above.
+    return false;
 });
+
+// --- Start Initialization ---
+initialize();
+
+// @@FILENAME@@ extension/content.js
