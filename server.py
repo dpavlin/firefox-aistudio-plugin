@@ -321,7 +321,9 @@ def run_script(filepath: str, script_type: str):
         python_exe = sys.executable or shutil.which("python3") or shutil.which("python") or "python"
         if not shutil.which(python_exe):
              print(f"E: Python interpreter '{python_exe}' not found.", file=sys.stderr)
-             try: logpath.write_text(f"Error: Python interpreter '{python_exe}' not found.\n", encoding='utf-8'); return False, str(logpath)
+             try: # Colon needed
+                 logpath.write_text(f"Error: Python interpreter '{python_exe}' not found.\n", encoding='utf-8')
+                 return False, str(logpath)
              except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
         command = [python_exe, str(filepath_obj)]
         interpreter_name = Path(python_exe).name
@@ -330,7 +332,9 @@ def run_script(filepath: str, script_type: str):
         shell_exe = shutil.which("bash") or shutil.which("sh")
         if not shell_exe:
              print("E: No 'bash' or 'sh' interpreter found in PATH.", file=sys.stderr)
-             try: logpath.write_text("Error: No 'bash' or 'sh' interpreter found.\n", encoding='utf-8'); return False, str(logpath)
+             try: # Colon needed
+                 logpath.write_text("Error: No 'bash' or 'sh' interpreter found.\n", encoding='utf-8')
+                 return False, str(logpath)
              except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
         command = [shell_exe, str(filepath_obj)]
         interpreter_name = Path(shell_exe).name
@@ -346,17 +350,23 @@ def run_script(filepath: str, script_type: str):
     except subprocess.TimeoutExpired:
         print(f"E: Script timed out after 15 seconds: {filepath_obj.name}", file=sys.stderr)
         log_content += f"--- ERROR ---\nScript execution timed out after 15 seconds.\n"
-        try: with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content); return False, str(logpath)
+        try: # Colon needed
+            with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
+            return False, str(logpath)
         except Exception as log_e: print(f"E: Failed to write timeout log for {filepath_obj.name}: {log_e}", file=sys.stderr); return False, None
     except FileNotFoundError:
         print(f"E: Script file '{filepath_obj}' or CWD '{run_cwd}' not found during execution.", file=sys.stderr)
         log_content += f"--- ERROR ---\nScript file '{filepath_obj}' or CWD '{run_cwd}' not found during execution.\n"
-        try: with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content); return False, str(logpath)
+        try: # Colon needed
+            with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
+            return False, str(logpath)
         except Exception as log_e: print(f"E: Failed to write FileNotFoundError log for {filepath_obj.name}: {log_e}", file=sys.stderr); return False, None
     except Exception as e:
         print(f"E: Unexpected error running script {filepath_obj.name}: {e}", file=sys.stderr)
         log_content += f"--- ERROR ---\nUnexpected error during script execution:\n{e}\n"
-        try: with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content); return False, str(logpath)
+        try: # Colon needed
+            with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
+            return False, str(logpath)
         except Exception as log_e: print(f"E: Failed to write general error log for {filepath_obj.name}: {log_e}", file=sys.stderr); return False, None
 
 def check_shell_syntax(filepath: str) -> tuple[bool, str | None]:
@@ -373,7 +383,9 @@ def check_shell_syntax(filepath: str) -> tuple[bool, str | None]:
     checker_exe = shutil.which("bash")
     if not checker_exe:
         print("W: 'bash' command not found. Cannot check shell syntax.", file=sys.stderr)
-        try: logpath.write_text("Error: 'bash' command not found for syntax check.\n", encoding='utf-8'); return False, str(logpath)
+        try: # Colon needed
+            logpath.write_text("Error: 'bash' command not found for syntax check.\n", encoding='utf-8')
+            return False, str(logpath)
         except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
 
     command = [checker_exe, '-n', str(filepath_obj)] # Use absolute path
@@ -399,18 +411,18 @@ def check_shell_syntax(filepath: str) -> tuple[bool, str | None]:
             return False, str(logpath)
 
     except FileNotFoundError:
+        # This covers the case where 'bash' exists but fails to run (very unlikely)
         print(f"E: Syntax check command '{checker_exe}' not found during execution.", file=sys.stderr)
         log_content += f"--- ERROR ---\nSyntax check command '{checker_exe}' not found during execution.\n"
-        # Line 357 - This block IS correct
-        try:
-            with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content); return False, str(logpath)
-        except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
+        try: # Colon needed and verified correct
+            with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
+            return False, str(logpath) # Return after writing log
+        except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None # Return if logging fails
 
     except subprocess.TimeoutExpired:
         print(f"E: Shell syntax check timed out for {filepath_obj.name}", file=sys.stderr)
         log_content += "--- ERROR ---\nShell syntax check timed out after 10 seconds.\n"
-        # FIX: Added colon after try
-        try:
+        try: # Colon needed and verified correct
              with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
              return False, str(logpath)
         except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
@@ -418,8 +430,7 @@ def check_shell_syntax(filepath: str) -> tuple[bool, str | None]:
     except Exception as e:
         print(f"E: Unexpected error checking shell syntax for {filepath_obj.name}: {e}", file=sys.stderr)
         log_content += f"--- ERROR ---\nUnexpected error during syntax check:\n{e}\n"
-        # FIX: Added colon after try
-        try:
+        try: # Colon needed and verified correct
             with open(logpath, 'w', encoding='utf-8') as f: f.write(log_content)
             return False, str(logpath)
         except Exception as log_e: print(f"E: writing log: {log_e}"); return False, None
@@ -639,13 +650,19 @@ def submit_code():
                         err_line = e.lineno if e.lineno else 'N/A'; err_offset = e.offset if e.offset else 'N/A'; err_msg = e.msg if e.msg else 'Unknown'; err_text = e.text.strip() if e.text else 'N/A'
                         print(f"E: Python Syntax Error in '{display_filename}': L{err_line} C{err_offset} -> {err_msg}", file=sys.stderr)
                         log_fn_base = Path(check_run_filepath).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_py_syntax_error.log"
-                        try: log_path_err.parent.mkdir(parents=True, exist_ok=True); log_path_err.write_text(f"Python Syntax Error:\nFile: {display_filename}\nLine: {err_line}\nOffset: {err_offset}\nMessage: {err_msg}\nContext:\n{err_text}", encoding='utf-8'); log_filename = log_path_err.name
+                        try: # Colon needed
+                            log_path_err.parent.mkdir(parents=True, exist_ok=True)
+                            log_path_err.write_text(f"Python Syntax Error:\nFile: {display_filename}\nLine: {err_line}\nOffset: {err_offset}\nMessage: {err_msg}\nContext:\n{err_text}", encoding='utf-8')
+                            log_filename = log_path_err.name
                         except Exception as log_e: print(f"E: Could not write Python syntax error log: {log_e}", file=sys.stderr)
                     except Exception as compile_e:
                         syntax_ok = False; run_success = False
                         print(f"E: Error during Python compile/setup for '{display_filename}': {compile_e}", file=sys.stderr)
                         log_fn_base = Path(check_run_filepath).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_py_compile_error.log"
-                        try: log_path_err.parent.mkdir(parents=True, exist_ok=True); log_path_err.write_text(f"Python Compile/Setup Error:\nFile: {display_filename}\nError: {compile_e}\n", encoding='utf-8'); log_filename = log_path_err.name
+                        try: # Colon needed
+                            log_path_err.parent.mkdir(parents=True, exist_ok=True)
+                            log_path_err.write_text(f"Python Compile/Setup Error:\nFile: {display_filename}\nError: {compile_e}\n", encoding='utf-8')
+                            log_filename = log_path_err.name
                         except Exception as log_e: print(f"E: Could not write Python compile error log: {log_e}", file=sys.stderr)
 
             elif file_extension == '.sh':
