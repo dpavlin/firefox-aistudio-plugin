@@ -257,4 +257,6 @@ def find_tracked_file_by_name(basename_to_find: str) -> str | None:
              return None
 
         tracked_files = result.stdout.splitlines()
-        matches = [f for f in tracked_files if Path(f).nam
+        matches = [f for f in tracked_files if Path(f).name == basename_to_find]
+
+        if len(matches) == 1: print(f"Info: Found unique tracked file match: '{matches[0]}'",
