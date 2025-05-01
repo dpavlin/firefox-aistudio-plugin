@@ -1,4 +1,3 @@
-# @@FILENAME@@ config_manager.py
 import argparse
 import json
 import sys
@@ -14,16 +13,18 @@ SAVE_FOLDER_PATH = SERVER_DIR / SAVE_FOLDER
 LOG_FOLDER_PATH = SERVER_DIR / LOG_FOLDER
 
 try:
-    THIS_SCRIPT_NAME = Path(__file__).name # Or the name of the main server script if different
-except NameError:
+    # Use the name of the main server script
+    THIS_SCRIPT_NAME = Path(sys.argv[0]).name
+except IndexError:
     THIS_SCRIPT_NAME = "server.py" # Fallback
 
 def load_config():
     """Loads config from JSON file, returns defaults if not found/invalid."""
+    # Use lowercase keys consistent with runtime config
     defaults = {
         'port': 5000,
-        'enable_python_run': False,
-        'enable_shell_run': False
+        'auto_run_python': False, # Renamed key
+        'auto_run_shell': False    # Renamed key
     }
     if not CONFIG_FILE.is_file():
         print(f"Info: Config file '{CONFIG_FILE}' not found. Using defaults.", file=sys.stderr)
@@ -36,10 +37,13 @@ def load_config():
                 loaded_config['port'] = int(config.get('port', defaults['port']))
                 if not (1 <= loaded_config['port'] <= 65535): loaded_config['port'] = defaults['port']
             except (ValueError, TypeError): loaded_config['port'] = defaults['port']
-            try: loaded_config['enable_python_run'] = bool(config.get('enable_python_run', defaults['enable_python_run']))
-            except TypeError: loaded_config['enable_python_run'] = defaults['enable_python_run']
-            try: loaded_config['enable_shell_run'] = bool(config.get('enable_shell_run', defaults['enable_shell_run']))
-            except TypeError: loaded_config['enable_shell_run'] = defaults['enable_shell_run']
+            # Map old keys if necessary, preferring new keys
+            py_run_val = config.get('auto_run_python', config.get('enable_python_run', defaults['auto_run_python']))
+            sh_run_val = config.get('auto_run_shell', config.get('enable_shell_run', defaults['auto_run_shell']))
+            try: loaded_config['auto_run_python'] = bool(py_run_val)
+            except TypeError: loaded_config['auto_run_python'] = defaults['auto_run_python']
+            try: loaded_config['auto_run_shell'] = bool(sh_run_val)
+            except TypeError: loaded_config['auto_run_shell'] = defaults['auto_run_shell']
             print(f"Info: Loaded config from '{CONFIG_FILE}': {loaded_config}", file=sys.stderr)
             return loaded_config
     except (json.JSONDecodeError, OSError) as e:
@@ -49,18 +53,23 @@ def load_config():
 def save_config(config_data):
     """Saves specific config data to JSON file, preserving other keys."""
     try:
-        current_saved_config = load_config() # Load existing state from file
-        # Only update keys that are explicitly passed in config_data
+        current_saved_config = load_config()
+        # Only update keys that are explicitly passed and known
+        valid_keys_to_save = ['port', 'auto_run_python', 'auto_run_shell']
         for key, value in config_data.items():
-            if key in current_saved_config: # Only update known keys
+            if key in valid_keys_to_save:
                  current_saved_config[key] = value
             else:
-                 print(f"W: Ignoring unknown key '{key}' during config save.", file=sys.stderr)
+                 # Map old keys if received from older popup version? Optional.
+                 if key == 'enable_python_run': current_saved_config['auto_run_python'] = value
+                 elif key == 'enable_shell_run': current_saved_config['auto_run_shell'] = value
+                 else: print(f"W: Ignoring unknown key '{key}' during config save.", file=sys.stderr)
 
+        # Ensure types before saving
         config_to_save = {
             'port': int(current_saved_config.get('port', 5000)),
-            'enable_python_run': bool(current_saved_config.get('enable_python_run', False)),
-            'enable_shell_run': bool(current_saved_config.get('enable_shell_run', False))
+            'auto_run_python': bool(current_saved_config.get('auto_run_python', False)),
+            'auto_run_shell': bool(current_saved_config.get('auto_run_shell', False))
         }
         if not (1 <= config_to_save['port'] <= 65535):
             print(f"W: Invalid port {config_to_save['port']} during save, reverting to default 5000.", file=sys.stderr)
@@ -68,15 +77,13 @@ def save_config(config_data):
 
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config_to_save, f, indent=4)
-        print(f"Info: Configuration saved to '{CONFIG_FILE}'. Restart server for changes.", file=sys.stderr)
+        print(f"Info: Configuration saved to '{CONFIG_FILE}'.", file=sys.stderr) # Removed restart msg here
         return True, config_to_save
     except (OSError, TypeError, ValueError) as e:
         print(f"E: Failed to save config file '{CONFIG_FILE}': {e}", file=sys.stderr)
         return False, None
 
 def _is_git_repository(check_dir: Path) -> bool:
-    """Checks if check_dir is a Git repository."""
-    # Renamed to avoid conflict if imported elsewhere
     try:
         result = subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], capture_output=True, text=True, check=False, encoding='utf-8', cwd=check_dir, timeout=5)
         return result.returncode == 0 and result.stdout.strip() == 'true'
@@ -94,34 +101,31 @@ def initialize_config():
     parser.add_argument('--enable-python-run', action='store_true', help='Enable Python script execution.')
     args = parser.parse_args()
 
-    # Determine effective runtime settings
     effective_port = args.port
-    # Command-line flags override config file values only if explicitly provided
-    run_python = args.enable_python_run if '--enable-python-run' in sys.argv else file_config['enable_python_run']
-    run_shell = args.shell if '--shell' in sys.argv else file_config['enable_shell_run']
+    # Use lowercase keys for consistency internally
+    run_python = args.enable_python_run if '--enable-python-run' in sys.argv else file_config['auto_run_python']
+    run_shell = args.shell if '--shell' in sys.argv else file_config['auto_run_shell']
 
-    # Check Git status
     is_repo = _is_git_repository(SERVER_DIR)
-    if not is_repo:
-        print("Info: Not running inside a Git work tree or 'git' command failed.", file=sys.stderr)
+    if not is_repo: print("Info: Not running inside a Git work tree or 'git' command failed.", file=sys.stderr)
 
-    # Create directories if they don't exist
     os.makedirs(SAVE_FOLDER_PATH, exist_ok=True)
     os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
 
-    config = {
+    # Store effective RUNTIME settings
+    runtime_config = {
         'SERVER_PORT': effective_port,
         'SERVER_DIR': SERVER_DIR,
         'SAVE_FOLDER_PATH': SAVE_FOLDER_PATH,
         'LOG_FOLDER_PATH': LOG_FOLDER_PATH,
         'CONFIG_FILE': CONFIG_FILE,
-        'THIS_SCRIPT_NAME': THIS_SCRIPT_NAME, # Pass this along
+        'THIS_SCRIPT_NAME': THIS_SCRIPT_NAME,
         'IS_REPO': is_repo,
-        'AUTO_RUN_PYTHON_ON_SYNTAX_OK': run_python,
-        'AUTO_RUN_SHELL_ON_SYNTAX_OK': run_shell,
-        'loaded_file_config': file_config # Keep the original file content if needed
+        'auto_run_python': run_python, # Use lowercase key
+        'auto_run_shell': run_shell,    # Use lowercase key
+        'loaded_file_config': file_config # Keep original loaded content if needed
     }
-    print(f"Effective Runtime Settings: Port={config['SERVER_PORT']}, PyRun={config['AUTO_RUN_PYTHON_ON_SYNTAX_OK']}, ShellRun={config['AUTO_RUN_SHELL_ON_SYNTAX_OK']}, Git={config['IS_REPO']}", file=sys.stderr)
+    print(f"Effective Runtime Settings: Port={runtime_config['SERVER_PORT']}, PyRun={runtime_config['auto_run_python']}, ShellRun={runtime_config['auto_run_shell']}, Git={runtime_config['IS_REPO']}", file=sys.stderr)
     print("-" * 30, file=sys.stderr)
-    return config
+    return runtime_config
 # @@FILENAME@@ config_manager.py
