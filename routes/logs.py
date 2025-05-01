@@ -1,5 +1,5 @@
 # @@FILENAME@@ routes/logs.py
-from flask import Blueprint, render_template_string, send_from_directory, current_app
+from flask import Blueprint, render_template_string, send_from_directory, current_app # Added Blueprint import
 import sys
 
 logs_bp = Blueprint('logs_bp', __name__)
@@ -32,7 +32,6 @@ def serve_log(filename):
         requested_path = (log_dir / filename).resolve()
         if not str(requested_path).startswith(str(log_dir)) or not requested_path.is_file():
             return "Log file not found", 404
-        # Use send_from_directory from Flask context
         return send_from_directory(log_folder_path, filename, mimetype='text/plain; charset=utf-8', as_attachment=False)
     except Exception as e: print(f"E: Error serving log file {filename}: {e}", file=sys.stderr); return "Error serving file", 500
 # @@FILENAME@@ routes/logs.py

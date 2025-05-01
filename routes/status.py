@@ -1,3 +1,4 @@
+# @@FILENAME@@ routes/status.py
 from flask import Blueprint, jsonify, current_app # Added Blueprint import
 
 status_bp = Blueprint('status_bp', __name__)
