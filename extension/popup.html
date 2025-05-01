@@ -4,17 +4,23 @@
 <head>
     <title>AI Code Capture</title>
     <style>
-        /* ... (keep existing styles) ... */
+        /* ... (keep most existing styles) ... */
         body { font-family: sans-serif; width: 320px; padding: 10px; background-color: #f0f0f0; color: #333; }
         h1, h2 { font-size: 16px; margin-top: 0; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
         h2 { font-size: 14px; margin-top: 15px; margin-bottom: 8px; }
         .setting-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 5px; border-radius: 4px; transition: background-color 0.2s ease; }
-        .setting-container:hover:not(.no-hover):not(.button-row):not(.config-section):not(.info-section) { background-color: #e0e0e0; } /* Updated hover exclusion */
-        .setting-container label { font-weight: bold; margin-right: 10px; flex-shrink: 0; font-size: 13px; min-width: 90px; /* Give labels consistent width */ text-align: right; }
+        .setting-container:hover:not(.no-hover):not(.config-section):not(.info-section) { background-color: #e0e0e0; }
+        .setting-container label { font-weight: bold; margin-right: 10px; flex-shrink: 0; font-size: 13px; min-width: 90px; text-align: right; }
         .setting-container input[type="number"] { width: 60px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: right; }
         .setting-container input[type="number"].invalid { border-color: red; }
-        .button-row { justify-content: flex-end; }
-        button#testConnectionBtn { padding: 5px 10px; font-size: 12px; cursor: pointer; background-color: #ddd; border: 1px solid #bbb; border-radius: 3px; }
+        /* Remove button-row specific style if no longer needed */
+        /* .button-row { justify-content: flex-end; } */
+        button#testConnectionBtn {
+            padding: 5px 10px; font-size: 12px; cursor: pointer;
+            background-color: #ddd; border: 1px solid #bbb; border-radius: 3px;
+            margin-left: 8px; /* Add space between input and button */
+            flex-shrink: 0; /* Prevent button from shrinking */
+        }
         button#testConnectionBtn:hover { background-color: #ccc; }
         button#testConnectionBtn:disabled { background-color: #eee; color: #aaa; cursor: default; }
         .switch { position: relative; display: inline-block; width: 40px; height: 20px; flex-shrink: 0; }
@@ -32,45 +38,20 @@
         #last-response.success { color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; }
         #last-response.info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; }
         #last-response.warning { color: #8a6d3b; background-color: #fcf8e3; border-color: #faebcc; }
-        .config-section, .info-section { /* Group styling for sections */
-             flex-direction: column;
-             align-items: stretch;
-             border: 1px solid #ddd;
-             border-radius: 5px;
-             padding: 5px 10px 10px 10px; /* Add padding */
-             margin-bottom: 10px;
-             background-color: #fff; /* White background for sections */
-        }
-        .config-section h2, .info-section h2 { /* Adjust section headers */
-            margin-top: 5px;
-            border-bottom: none; /* Remove border from section headers */
-            padding-bottom: 5px;
-            text-align: center;
-            font-size: 13px;
-            color: #555;
-        }
-        .config-section .setting-container, .info-section .setting-container {
-             padding-left: 0;
-             padding-right: 0;
-             margin-bottom: 8px; /* Reduce margin inside sections */
-         }
+        .config-section, .info-section { flex-direction: column; align-items: stretch; border: 1px solid #ddd; border-radius: 5px; padding: 5px 10px 10px 10px; margin-bottom: 10px; background-color: #fff; }
+        .config-section h2, .info-section h2 { margin-top: 5px; border-bottom: none; padding-bottom: 5px; text-align: center; font-size: 13px; color: #555; }
+        .config-section .setting-container, .info-section .setting-container { padding-left: 0; padding-right: 0; margin-bottom: 8px; }
         .warning-text { font-size: 11px; color: #8a6d3b; text-align: center; margin-top: 5px; }
-        .info-text {
-            font-size: 12px;
-            color: #555;
-            background-color: #eee;
-            padding: 4px 6px;
-            border-radius: 3px;
-            border: 1px solid #ddd;
-            flex-grow: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            margin-left: 5px;
-            font-family: monospace; /* Use monospace for paths */
+        .info-text { font-size: 12px; color: #555; background-color: #eee; padding: 4px 6px; border-radius: 3px; border: 1px solid #ddd; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 5px; font-family: monospace; }
+        .info-text.status-true { color: #3c763d; border-color: #d6e9c6;}
+        .info-text.status-false { color: #a94442; border-color: #ebccd1;}
+        /* New style for the input+button group */
+        .input-button-group {
+            display: flex;
+            align-items: center;
+            flex-grow: 1; /* Allow this group to take space */
+            justify-content: flex-end; /* Align items to the right */
         }
-        .info-text.status-true { color: #3c763d; border-color: #d6e9c6;} /* Greenish for TRUE */
-        .info-text.status-false { color: #a94442; border-color: #ebccd1;} /* Reddish for FALSE */
     </style>
 </head>
 <body>
@@ -80,8 +61,18 @@
     <h2>Extension Controls</h2>
     <div class="setting-container no-hover">
         <label for="serverPort">Server Port:</label>
-        <input type="number" id="serverPort" min="1025" max="65535" step="1">
+        <!-- Group input and button -->
+        <div class="input-button-group">
+            <input type="number" id="serverPort" min="1025" max="65535" step="1">
+            <button id="testConnectionBtn">Test</button> <!-- Shortened Text -->
+        </div>
     </div>
+     <!-- Server CWD Display -->
+     <div class="setting-container no-hover">
+         <label>Server CWD:</label> <!-- Removed for attribute -->
+         <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory (read-only)">Loading...</span>
+     </div>
+     <!-- Removed the separate button row -->
     <div class="setting-container">
         <label for="activationToggle">Auto-Capture:</label>
         <label class="switch">
@@ -89,17 +80,10 @@
             <span class="slider"></span>
         </label>
     </div>
-    <div class="setting-container button-row">
-         <button id="testConnectionBtn">Test Connection</button>
-     </div>
 
     <!-- Server Information -->
      <div class="info-section">
          <h2>Server Information (Read-Only)</h2>
-         <div class="setting-container no-hover">
-             <label>Working Dir:</label>
-             <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Loading...</span>
-         </div>
          <div class="setting-container no-hover">
              <label>Save Dir:</label>
              <span id="serverSaveDirDisplay" class="info-text" title="Directory for non-Git saves (relative to CWD)">Loading...</span>
