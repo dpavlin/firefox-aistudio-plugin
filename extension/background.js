@@ -1,3 +1,4 @@
+// @@FILENAME@@ extension/background.js
 'use strict';
 
 console.log("Background script (v7 - Popup CWD) loaded.");
