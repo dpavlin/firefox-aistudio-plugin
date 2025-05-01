@@ -1,40 +1,45 @@
 // @@FILENAME@@ extension/background.js
 'use strict';
 
-console.log("Background script (v7 - Popup CWD) loaded.");
+console.log("Background script (v8 - Per-Tab Port) loaded.");
 
 // --- Globals for settings ---
-let serverPort = 5000; // Default port
-let isActivated = true;  // Default activation state
+let defaultServerPort = 5000; // Default port (used if no tab-specific one is set)
+let isActivated = true;     // Global activation state
+const tabPortMap = new Map(); // Map: tabId -> portNumber
 
-// --- Load initial settings from storage ---
+// --- Load initial DEFAULT settings from storage ---
 function loadInitialSettings() {
-    // ... (keep existing implementation)
+    // Only load global settings: default port and activation state
     return browser.storage.local.get(['port', 'isActivated'])
         .then(result => {
-            let changed = false;
+            let defaultPortChanged = false;
             if (result.port !== undefined && typeof result.port === 'number' && result.port >= 1025 && result.port <= 65535) {
-                serverPort = result.port;
+                defaultServerPort = result.port;
             } else {
-                console.log("Port not found or invalid in storage, using default:", serverPort);
-                browser.storage.local.set({ port: serverPort });
-                changed = true;
+                // Default Port not set or invalid, save default
+                console.log("Default Port not found or invalid in storage, using default:", defaultServerPort);
+                browser.storage.local.set({ port: defaultServerPort }); // Save the default global port
+                defaultPortChanged = true;
             }
 
             if (result.isActivated !== undefined && typeof result.isActivated === 'boolean') {
                 isActivated = result.isActivated;
             } else {
+                // Activation state not set, save default
                 console.log("Activation state not found in storage, using default:", isActivated);
-                browser.storage.local.set({ isActivated: isActivated });
-                changed = true;
+                browser.storage.local.set({ isActivated: isActivated }); // Save the default
             }
-            console.log(`Initial settings loaded: Port=${serverPort}, Activated=${isActivated}`);
-            if (changed) {
-                 console.log("Default setting(s) saved to storage.");
+            console.log(`Initial settings loaded: Default Port=${defaultServerPort}, Activated=${isActivated}`);
+            if (defaultPortChanged) {
+                 console.log("Default port setting saved to storage.");
             }
         })
         .catch(error => {
-            console.error("Error loading settings from storage:", error);
+            console.error("Error loading initial settings from storage:", error);
+            // Keep hardcoded defaults if loading fails
+            defaultServerPort = 5000;
+            isActivated = true;
         });
 }
 
@@ -47,158 +52,230 @@ function loadInitialSettings() {
 
 // --- Listener for extension installation/update ---
 browser.runtime.onInstalled.addListener(details => {
-    // ... (keep existing implementation)
     console.log("Extension installed/updated:", details.reason);
     loadInitialSettings().then(() => {
-         console.log("Settings re-verified/defaults set on install/update. Current:", { port: serverPort, isActivated: isActivated });
+         console.log("Settings re-verified/defaults set on install/update. Current:", { defaultPort: defaultServerPort, isActivated: isActivated });
     });
+    // Clear the transient tab map on update/install
+    tabPortMap.clear();
+    console.log("Tab-port map cleared on install/update.");
 });
+
+// --- NEW: Listener for Tab Closure ---
+browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    if (tabPortMap.has(tabId)) {
+        tabPortMap.delete(tabId);
+        console.log(`Removed port mapping for closed tab: ${tabId}. Map size: ${tabPortMap.size}`);
+    }
+});
+
 
 // --- Function to send status updates TO the popup ---
 async function sendStatusToPopup(message, type = 'info') {
-     // ... (keep existing implementation)
+     /* ... (implementation unchanged) ... */
      console.log(`Background sending status to popup: ${message} (Type: ${type})`);
      try {
          const views = browser.extension.getViews({ type: "popup" });
          if (views.length > 0) {
              await browser.runtime.sendMessage({ action: "updatePopupStatus", message: message, type: type });
-             console.log("Status message sent to popup.");
-         } else {
-             console.log("Popup not open, status message not sent.");
-         }
-     } catch (error) {
-         console.error("Error sending status message to popup:", error);
-     }
+              console.log("Status message sent to popup.");
+         } else { console.log("Popup not open, status message not sent."); }
+     } catch (error) { console.error("Error sending status message to popup:", error); }
+}
+
+// --- Helper to get port for a given tab ID ---
+function getPortForTab(tabId) {
+    // Return tab-specific port if set, otherwise return the global default
+    const port = tabPortMap.get(tabId) || defaultServerPort;
+    // console.log(`getPortForTab(${tabId}): Found=${tabPortMap.has(tabId)}, Port=${port}`); // Debugging - can be noisy
+    return port;
 }
 
 
 // --- Main Message Listener ---
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log(`Background received message: `, message, ` From: ${sender.tab ? `Tab ID ${sender.tab.id}` : "Popup/Other"}`);
+    // Determine the originating tab ID if possible
+    // Messages from popup should include 'tabId', messages from content script use sender.tab.id
+    const originatingTabId = message.tabId || sender?.tab?.id;
+    const source = message.tabId ? "Popup" : (sender?.tab?.id ? `Content Script (Tab ${sender.tab.id})` : "Other/Unknown");
 
+    console.log(`Background received message: `, message, ` From: ${source}`);
+
+    // --- Get Settings (for Popup) ---
     if (message.action === "getSettings") {
-        // ... (keep existing implementation)
-        console.log("Background responding with settings:", { port: serverPort, isActivated: isActivated });
-        return Promise.resolve({ port: serverPort, isActivated: isActivated });
+        if (!originatingTabId) {
+            console.error("getSettings: Originating Tab ID missing.");
+            return Promise.reject(new Error("Tab ID required for getSettings"));
+        }
+        const portForThisTab = getPortForTab(originatingTabId);
+        const settingsResponse = { port: portForThisTab, isActivated: isActivated };
+        console.log(`Background responding to getSettings for Tab ${originatingTabId} with:`, settingsResponse);
+        return Promise.resolve(settingsResponse);
     }
+    // --- Update Setting (from Popup) ---
     else if (message.action === "updateSetting") {
-        // ... (keep existing implementation)
-        if (message.key === "port") {
-            const newPort = parseInt(message.value, 10);
-            if (!isNaN(newPort) && newPort >= 1025 && newPort <= 65535) {
-                serverPort = newPort;
-                browser.storage.local.set({ port: serverPort })
-                    .then(() => console.log("Saved new port to storage:", serverPort))
-                    .catch(err => console.error("Error saving port:", err));
-                return Promise.resolve({ success: true });
-            } else { return Promise.reject(new Error("Invalid port number")); }
-        } else if (message.key === "isActivated") {
+        if (!originatingTabId) {
+            console.error("updateSetting: Originating Tab ID missing.");
+            return Promise.reject(new Error("Tab ID required for updateSetting"));
+        }
+        // Update GLOBAL activation state
+        if (message.key === "isActivated") {
             const newState = Boolean(message.value);
             isActivated = newState;
-            browser.storage.local.set({ isActivated: isActivated })
-                .then(() => console.log("Saved new activation state to storage:", isActivated))
+            browser.storage.local.set({ isActivated: isActivated }) // Save global state
+                .then(() => console.log("Saved GLOBAL activation state to storage:", isActivated))
                 .catch(err => console.error("Error saving activation state:", err));
+            // Optionally notify other content scripts/popups? Might be complex.
             return Promise.resolve({ success: true });
-        } else { return Promise.reject(new Error("Unknown setting key")); }
+        }
+        // Update TAB-SPECIFIC port mapping (Does NOT change defaultServerPort or storage)
+        else if (message.key === "port") {
+            const newPort = parseInt(message.value, 10);
+            if (!isNaN(newPort) && newPort >= 1025 && newPort <= 65535) {
+                tabPortMap.set(originatingTabId, newPort);
+                console.log(`Set port for Tab ${originatingTabId} to ${newPort}. Current map:`, tabPortMap);
+                return Promise.resolve({ success: true }); // Acknowledge update for this tab
+            } else {
+                console.warn("Invalid port value received for update:", message.value);
+                return Promise.reject(new Error("Invalid port number"));
+            }
+        }
+        // Update DEFAULT port (if we add a separate UI element later)
+        // else if (message.key === "defaultPort") { ... }
+        else {
+            console.warn("Unknown setting key received for update:", message.key);
+            return Promise.reject(new Error("Unknown setting key"));
+        }
     }
-    else if (message.action === "testConnection") {
-        // ... (keep existing implementation - it already gets full status)
-        const url = `http://127.0.0.1:${serverPort}/test_connection`;
-        console.log(`Background testing connection to: ${url}`);
-        fetch(url, { method: 'GET', mode: 'cors' })
+    // --- Test Connection / Get Server Config (from Popup) ---
+    else if (message.action === "testConnection" || message.action === "getServerConfig") {
+         if (!originatingTabId) {
+            console.error(`${message.action}: Originating Tab ID missing.`);
+            return Promise.reject(new Error(`Tab ID required for ${message.action}`));
+         }
+        const portToUse = getPortForTab(originatingTabId); // Use tab-specific or default port
+        const endpoint = (message.action === "testConnection") ? "test_connection" : "status";
+        const url = `http://127.0.0.1:${portToUse}/${endpoint}`;
+        console.log(`Background action '${message.action}' for Tab ${originatingTabId}: Fetching ${url}`);
+
+        return fetch(url, { method: 'GET', mode: 'cors' })
             .then(response => {
                 if (!response.ok) {
-                    return response.json().catch(() => null).then(errorData => {
-                         sendResponse({ success: false, error: `Server Error (Status ${response.status})`, data: errorData || { error: response.statusText } });
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                 if (data) {
-                      console.log("Test Connection successful. Server response:", data);
-                      sendResponse({ success: true, data: data }); // Already sends full status data
-                 } else {
-                      // Handle case where response is ok but data is null/undefined (maybe non-JSON response?)
-                      sendResponse({ success: false, error: 'Received OK status but invalid/empty data from server.' });
+                     // Try to parse error even on bad status
+                     return response.json().catch(() => null).then(errorData => {
+                         throw new Error(`Server Error (Status ${response.status}): ${errorData?.message || response.statusText || 'Unknown server error'}`);
+                     });
                  }
-            })
-            .catch(error => {
-                console.error("Test Connection: Network or fetch error:", error);
-                sendResponse({ success: false, error: `Network/Fetch Error: ${error.message}` });
-            });
-        return true;
-    }
-    else if (message.action === "getServerConfig") {
-        // *** MODIFIED: Return the full status data ***
-        const url = `http://127.0.0.1:${serverPort}/status`;
-        console.log(`Background getting server config/status from: ${url}`);
-
-        fetch(url, { method: 'GET', mode: 'cors' })
-            .then(response => {
-                if (!response.ok) { throw new Error(`Server responded with status ${response.status}`); }
                 return response.json();
             })
             .then(data => {
-                console.log("Background received server status/config:", data);
-                // Send the whole data object back, popup will extract what it needs
-                sendResponse({ success: true, data: data });
-            })
+                 console.log(`${message.action} successful for Tab ${originatingTabId}. Server response:`, data);
+                 // Send back success and the *full* data from the server
+                 return { success: true, data: data };
+             })
             .catch(error => {
-                console.error("Background fetch error getting server config/status:", error);
-                sendResponse({ success: false, error: `Failed to fetch server info: ${error.message}` });
-            });
-        return true; // Indicate async response
+                 console.error(`${message.action} for Tab ${originatingTabId}: Network or fetch error:`, error);
+                 // Send back failure and the error message
+                 return { success: false, error: error.message };
+             });
+        // Return the promise chain
     }
+    // --- Update Server Config File (from Popup) ---
      else if (message.action === "updateServerConfig") {
-         // ... (keep existing implementation)
-         const url = `http://127.0.0.1:${serverPort}/update_config`;
-         const configKey = message.key;
-         const configValue = message.value;
-         if (configKey !== 'enable_python_run' && configKey !== 'enable_shell_run') {
+        // This action modifies the JSON file, affecting future server starts.
+        // It also modifies the *currently running* server's auto-run flags.
+        // It needs the config functions passed from server.py
+        if (!current_app?.config?.['save_config_func']) { // Check if function reference exists
+            console.error("updateServerConfig: save_config_func not available in app context.");
+             return Promise.resolve({ success: false, error: "Server integration error (missing save func)." });
+        }
+        const save_config_func = current_app.config['save_config_func'];
+        const runtime_config = current_app.config['APP_CONFIG'];
+
+        const configKey = message.key; // Should be auto_run_python or auto_run_shell
+        const configValue = message.value;
+        const live_update_keys = ['auto_run_python', 'auto_run_shell'];
+
+        if (configKey !== 'auto_run_python' && configKey !== 'auto_run_shell') {
+              console.error("Background: Invalid key for server config update:", configKey);
               return Promise.reject(new Error("Invalid server configuration key"));
-         }
-         const payload = {};
-         payload[configKey] = configValue;
-         console.log(`Background sending server config update to ${url}:`, payload);
-         fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, mode: 'cors', body: JSON.stringify(payload) })
-         .then(response => response.json().catch(err => {
-              return response.text().then(text => { throw new Error(`Server response not JSON. Status: ${response.status}. Body: ${text || '(empty)'}`); });
-         }))
-         .then(data => {
-              console.log("Background received response from /update_config:", data);
-              if (data && data.status === 'success') { sendResponse({ success: true, message: data.message }); }
-              else { sendResponse({ success: false, message: data?.message || 'Server returned error or unexpected response.' }); }
-         })
-         .catch(error => {
-              console.error("Background fetch error updating server config:", error);
-              sendResponse({ success: false, error: `Network/Fetch Error: ${error.message}` });
-         });
-         return true;
+        }
+
+        // 1. Update live runtime config immediately
+        let runtime_updated = false;
+        if (runtime_config[configKey] !== configValue) {
+            runtime_config[configKey] = configValue;
+            runtime_updated = true;
+            console.log(`RUNTIME update: ${configKey} set to ${configValue}.`);
+        }
+
+        // 2. Prepare data to save to file
+        const payload = { [configKey]: configValue };
+        console.log(`Background preparing to save server config update:`, payload);
+
+        // 3. Save to file (This is synchronous within the server thread, but the message handling is async)
+        const [save_success, saved_data] = save_config_func(payload);
+
+        if (save_success) {
+            const message = `Server config file updated. ${runtime_updated ? 'Setting applied immediately.' : 'No runtime change needed.'}`;
+             return Promise.resolve({ success: true, message: message });
+        } else {
+            // If save failed, should we revert the runtime change? Potentially complex.
+            // For now, just report the save failure.
+            console.error("Failed to save config to file after runtime update.");
+             return Promise.resolve({ success: false, message: "Failed to save config file." });
+        }
+        // Note: This specific handler assumes it's running within the server's context
+        // where current_app is available. If background.js were truly separate,
+        // it would need to send a message *to* the server for this action.
      }
+    // --- Submit Code (from Content Script) ---
     else if (message.action === "submitCode") {
-        // ... (keep existing implementation)
-        if (!isActivated) { return Promise.resolve({ status: 'ignored', message: 'Extension is deactivated.' }); }
+        if (!isActivated) {
+            console.log("Background: Received code submission, but extension is deactivated. Ignoring.");
+            return Promise.resolve({ success: false, details: { message: 'Extension is deactivated.' } }); // Return details structure
+        }
+        if (!originatingTabId) {
+            console.error("submitCode: Originating Tab ID missing from sender.");
+            return Promise.resolve({ success: false, details: { message: 'Internal Error: Missing sender tab ID.' } });
+        }
+
         const codeData = message.data;
-        const url = `http://127.0.0.1:${serverPort}/submit_code`;
-        console.log(`Background submitting code to: ${url}`);
-        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', }, mode: 'cors', body: JSON.stringify({ code: codeData }) })
+        const portToUse = getPortForTab(originatingTabId); // Use tab-specific or default port
+        const url = `http://127.0.0.1:${portToUse}/submit_code`;
+        console.log(`Background submitting code for Tab ${originatingTabId} to: ${url}`);
+
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', },
+            mode: 'cors',
+            body: JSON.stringify({ code: codeData })
+        })
         .then(response => response.json().catch(err => {
-             return response.text().then(text => { throw new Error(`Server response not JSON. Status: ${response.status}. Body: ${text || '(empty)'}`); });
+             console.error(`Failed to parse JSON response from ${url}:`, err);
+             return response.text().then(text => {
+                 throw new Error(`Server response not JSON. Status: ${response.status}. Body: ${text || '(empty)'}`);
+             });
         }))
         .then(data => {
-            console.log("Background received server response for code submission:", data);
-            if (data && (data.status === 'success' || data.git_updated === true)) { return { success: true, details: data }; }
-            else { console.warn("Server reported failure or unexpected status:", data); return { success: false, details: data || { message: "Unknown server error format."} }; }
+            console.log(`Background received server response for Tab ${originatingTabId}:`, data);
+            if (data && (data.status === 'success' || data.git_updated === true)) {
+                return { success: true, details: data };
+            } else {
+                console.warn(`Server reported failure or unexpected status for Tab ${originatingTabId}:`, data);
+                return { success: false, details: data || { message: "Unknown server error format."} };
+            }
         })
         .catch(error => {
-            console.error("Background fetch error during code submission:", error);
+            console.error(`Background fetch error during code submission for Tab ${originatingTabId} to ${url}:`, error);
             return { success: false, details: { message: `Network/Fetch Error: ${error.message}` } };
         });
+        // The promise chain is returned automatically
     }
 
-    console.log("Background: Message action not recognized:", message.action);
-    return false;
+    // If message.action is none of the above
+    console.log("Background: Message action not recognized or improperly handled:", message.action);
+    return false; // Indicate message not handled synchronously if no promise was returned
 });
 
 console.log("Background script message listeners registered.");
