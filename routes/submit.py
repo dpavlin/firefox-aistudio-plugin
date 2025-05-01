@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 # @@FILENAME@@ routes/submit.py
-from flask import Blueprint, jsonify, request, current_app # Added Blueprint import
+
+from flask import Blueprint, jsonify, request, current_app
 from pathlib import Path
 import sys
 import traceback # For detailed error logging
@@ -17,17 +19,24 @@ def submit_code_route():
     config = current_app.config['APP_CONFIG']
     request_lock = current_app.config['REQUEST_LOCK']
 
-    print("--- /submit_code request received, attempting lock acquisition ---", file=sys.stderr)
-    acquired = request_lock.acquire() # Defaults to blocking=True
+    print("--- /submit_code request received, attempting lock acquisition (blocking) ---", file=sys.stderr)
+    # *** ENSURE THIS IS BLOCKING (default behavior) ***
+    # acquire() without arguments defaults to blocking=True.
+    # This line will PAUSE execution if the lock is held, until it's released.
+    request_lock.acquire()
     print("--- Lock acquired, proceeding with request ---", file=sys.stderr)
+    # *** NO 'if not acquired:' check needed here when blocking=True ***
 
     try:
-        # --- Existing logic remains the same ---
+        # --- The rest of the request processing logic ---
+        print("\n--- Handling /submit_code request (inside lock) ---", file=sys.stderr) # Log inside lock
         data = request.get_json()
         if not data: return jsonify({'status': 'error', 'message': 'Request body must be JSON.'}), 400
         received_code = data.get('code', '')
         if not received_code or received_code.isspace(): return jsonify({'status': 'error', 'message': 'Empty code received.'}), 400
 
+        # (Keep the existing logic for marker parsing, saving, git, checks)
+        # ...
         save_filepath_str = None; final_save_filename = None
         code_to_save = received_code; extracted_filename_raw = None
         marker_line_length = 0; was_git_updated = False
@@ -40,10 +49,11 @@ def submit_code_route():
             marker_line_length = match.end(0)
             if marker_line_length < len(received_code) and received_code[marker_line_length] == '\n': marker_line_length += 1
             elif marker_line_length < len(received_code) and received_code[marker_line_length:marker_line_length+2] == '\r\n': marker_line_length += 2
-            print(f"Info: Found @@FILENAME@@ marker: '{extracted_filename_raw}'", file=sys.stderr)
+            # print(f"Info: Found @@FILENAME@@ marker: '{extracted_filename_raw}'", file=sys.stderr) # Less verbose logging inside lock
             sanitized_path_from_marker = sanitize_filename(extracted_filename_raw)
 
             if sanitized_path_from_marker:
+                # print(f"Info: Sanitized path from marker: '{sanitized_path_from_marker}'", file=sys.stderr)
                 if config['IS_REPO']:
                     git_path_to_check = sanitized_path_from_marker
                     if '/' not in sanitized_path_from_marker.replace('\\', '/'):
@@ -54,6 +64,7 @@ def submit_code_route():
                     else:
                         is_tracked = is_git_tracked(git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                         if is_tracked:
+                            # print(f"Info: Target path '{git_path_to_check}' is tracked. Attempting Git update.", file=sys.stderr)
                             code_to_save = received_code[marker_line_length:]
                             commit_success = update_and_commit_file(absolute_path_target, code_to_save, git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                             if commit_success:
@@ -129,7 +140,7 @@ def submit_code_route():
             'detected_language': detected_language_name
         }
         print(f"Sending response: {response_data}", file=sys.stderr)
-        print("--- Request complete ---")
+        print("--- Request complete (inside lock) ---")
         return jsonify(response_data)
 
     except Exception as e:
@@ -137,9 +148,14 @@ def submit_code_route():
         traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': f'Internal server error: {e}'}), 500
     finally:
+        # Ensure the lock is released even if errors occur
+        # Use request_lock.locked() which checks if the *current thread* holds the lock
+        # before attempting release. This is robust.
         if request_lock.locked():
              request_lock.release()
              print("--- Lock released ---", file=sys.stderr)
         else:
-             print("W: Lock was not held in finally block - potential issue?", file=sys.stderr)
+             # This case *should not* happen with blocking acquire unless an error occurred
+             # *before* the acquire() call finished within this request handler thread.
+             print("W: Lock was not held by this thread in finally block?", file=sys.stderr)
 # @@FILENAME@@ routes/submit.py
