@@ -1,12 +1,11 @@
-# @@FILENAME@@ routes/status.py
-from flask import Blueprint, jsonify, current_app
+from flask import Blueprint, jsonify, current_app # Added Blueprint import
 
 status_bp = Blueprint('status_bp', __name__)
 
 @status_bp.route('/status', methods=['GET'])
 def get_status():
     """Returns current server status and RUNNING configuration."""
-    config = current_app.config['APP_CONFIG']
+    config = current_app.config['APP_CONFIG'] # Access config passed during registration
     status_data = {
         'status': 'running',
         'working_directory': str(config['SERVER_DIR']),
@@ -25,5 +24,5 @@ def get_status():
 def test_connection():
     """Simple endpoint to test if the server is running, returns status."""
     print("Received /test_connection request", file=sys.stderr)
-    return get_status()
+    return get_status() # Reuse the status endpoint logic
 # @@FILENAME@@ routes/status.py
