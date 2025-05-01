@@ -1,188 +1,170 @@
-// @@FILENAME@@ popup.js
 document.addEventListener('DOMContentLoaded', () => {
-    const activationToggle = document.getElementById('activationToggle');
     const serverPortInput = document.getElementById('serverPort');
-    const statusDisplay = document.getElementById('last-response');
-    const testConnectionBtn = document.getElementById('testConnectionBtn');
-    let currentTabId = null;
-    const DEFAULT_PORT = 5000; // Keep default consistent
+    const activationToggle = document.getElementById('activationToggle');
+    const refreshStatusBtn = document.getElementById('refreshStatusBtn');
+    const saveConfigBtn = document.getElementById('saveConfigBtn');
+    const lastActionStatus = document.getElementById('last-action-status');
 
-    function validatePort(port) {
-        const num = parseInt(port, 10);
-        return !isNaN(num) && num >= 1025 && num <= 65535;
+    // --- Status Display Elements ---
+    const serverLiveStatus = document.getElementById('serverLiveStatus');
+    const serverRunningPort = document.getElementById('serverRunningPort');
+    const serverDetailsSection = document.getElementById('server-details');
+    const serverCwd = document.getElementById('serverCwd');
+    const serverGitStatus = document.getElementById('serverGitStatus');
+    const serverConfigFileStatus = document.getElementById('serverConfigFileStatus');
+    const currentPythonRun = document.getElementById('currentPythonRun');
+    const currentShellRun = document.getElementById('currentShellRun');
+
+    // --- Config Editable Elements ---
+    const enablePythonToggle = document.getElementById('enablePythonToggle');
+    const enableShellToggle = document.getElementById('enableShellToggle');
+
+    let currentServerConfig = {}; // Store last known server config
+
+    // --- Utility Functions ---
+    function updateStatusDisplay(message, type = 'info') {
+        lastActionStatus.textContent = message;
+        lastActionStatus.className = type; // error, success, warning, info
     }
 
-    // --- Get current tab ID ---
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs && tabs.length > 0) {
-            currentTabId = tabs[0].id;
-            console.log("Popup opened for Tab ID:", currentTabId);
-            loadState(); // Load state only after getting tab ID
-            testConnectionBtn.disabled = false; // Enable button once tab ID is known
+    function updateServerDetailsUI(data) {
+        if (data && data.status === 'running') {
+            serverLiveStatus.textContent = 'Running';
+            serverLiveStatus.className = 'value success';
+            serverRunningPort.textContent = data.port || 'N/A';
+            serverCwd.textContent = data.working_directory || 'N/A';
+            serverGitStatus.textContent = data.is_git_repo ? 'Yes' : 'No';
+            serverConfigFileStatus.textContent = data.config_file_exists ? 'Found' : 'Not Found';
+            currentPythonRun.textContent = data.auto_run_python ? 'ENABLED' : 'DISABLED';
+            currentShellRun.textContent = data.auto_run_shell ? 'ENABLED' : 'DISABLED';
+
+            // Set the editable toggles based on current server state initially
+            // Only do this if we don't have pending changes maybe? Or always sync? Let's sync.
+            enablePythonToggle.checked = data.auto_run_python;
+            enableShellToggle.checked = data.auto_run_shell;
+
+            serverDetailsSection.style.display = 'block';
+            saveConfigBtn.disabled = false; // Enable saving if connected
         } else {
-            console.error("Could not get active tab ID for popup.");
-            statusDisplay.textContent = "Error: Could not identify active tab.";
-            statusDisplay.className = 'error';
-            testConnectionBtn.disabled = true;
+            serverLiveStatus.textContent = 'Offline / Error';
+            serverLiveStatus.className = 'value error';
+            serverRunningPort.textContent = 'N/A';
+            serverCwd.textContent = 'N/A';
+            serverGitStatus.textContent = 'N/A';
+             serverConfigFileStatus.textContent = 'N/A';
+            currentPythonRun.textContent = 'N/A';
+            currentShellRun.textContent = 'N/A';
+            serverDetailsSection.style.display = 'none';
+            saveConfigBtn.disabled = true;
         }
+    }
+
+    // --- Fetch Server Status ---
+    async function fetchServerStatus() {
+        updateStatusDisplay('Checking server status...', 'info');
+        const port = serverPortInput.value;
+        if (!port || port < 1025 || port > 65535) {
+            updateStatusDisplay('Invalid port number.', 'error');
+            updateServerDetailsUI(null); // Clear details
+            return;
+        }
+        const url = `http://127.0.0.1:${port}/status`;
+
+        try {
+            const response = await fetch(url, { method: 'GET', cache: 'no-cache' });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            currentServerConfig = data; // Store the latest successful status
+            updateServerDetailsUI(data);
+            updateStatusDisplay(`Status refreshed successfully at ${new Date().toLocaleTimeString()}`, 'success');
+
+        } catch (error) {
+            console.error('Error fetching server status:', error);
+            updateStatusDisplay(`Failed to connect to server on port ${port}. Is it running?\nError: ${error.message}`, 'error');
+            currentServerConfig = {}; // Clear stored config on error
+            updateServerDetailsUI(null); // Clear details UI
+        }
+    }
+
+    // --- Save Configuration ---
+    async function saveConfiguration() {
+        const port = serverPortInput.value;
+        const desiredPythonRun = enablePythonToggle.checked;
+        const desiredShellRun = enableShellToggle.checked;
+
+        updateStatusDisplay('Saving configuration...', 'info');
+        saveConfigBtn.disabled = true; // Disable while saving
+
+        const configPayload = {
+            auto_run_python: desiredPythonRun,
+            auto_run_shell: desiredShellRun
+            // Not sending port, as decided
+        };
+
+        const url = `http://127.0.0.1:${port}/update_config`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(configPayload)
+            });
+            const result = await response.json(); // Expect JSON response from server
+
+            if (!response.ok || result.status !== 'success') {
+                 throw new Error(result.message || `HTTP error! status: ${response.status}`);
+            }
+
+            console.log('Config save response:', result);
+            updateStatusDisplay(`${result.message}`, 'warning'); // Use warning to emphasize restart needed
+
+            // Optionally refresh status display immediately after save
+            // Note: The displayed *current* status won't change until server restarts
+            // fetchServerStatus();
+
+        } catch (error) {
+            console.error('Error saving configuration:', error);
+            updateStatusDisplay(`Error saving configuration: ${error.message}`, 'error');
+        } finally {
+            // Re-enable button unless server became unreachable during save attempt
+             if (serverLiveStatus.textContent === 'Running') {
+                 saveConfigBtn.disabled = false;
+             }
+        }
+    }
+
+
+    // --- Load Settings and Initial Status ---
+    chrome.storage.local.get(['serverPort', 'isActivated'], (result) => {
+        serverPortInput.value = result.serverPort || '5000'; // Default to 5000 if not set
+        activationToggle.checked = !!result.isActivated;
+        fetchServerStatus(); // Fetch status on popup open
     });
-
-    // --- Load initial state (called after getting tab ID) ---
-    function loadState() {
-        if (!currentTabId) return;
-
-        // Request data associated with *this* tab from the background script
-        chrome.runtime.sendMessage({ action: 'getPopupData', tabId: currentTabId }, (response) => {
-            if (chrome.runtime.lastError) {
-                console.error("Error getting popup data:", chrome.runtime.lastError.message);
-                statusDisplay.textContent = `Error loading: ${chrome.runtime.lastError.message}`;
-                statusDisplay.className = 'error';
-                activationToggle.checked = true; // Default UI state on error
-                serverPortInput.value = DEFAULT_PORT;
-                serverPortInput.classList.remove('invalid');
-            } else if (response && response.error) {
-                console.error("Error received from background:", response.error);
-                statusDisplay.textContent = `Error: ${response.error}`;
-                statusDisplay.className = 'error';
-            } else if (response) {
-                console.log("Popup received data:", response);
-                activationToggle.checked = response.activated;
-                serverPortInput.value = response.port;
-                serverPortInput.classList.remove('invalid');
-                updateStatusDisplay(response.lastResponse);
-            } else {
-                console.warn("Received empty/invalid response from background for getPopupData");
-                statusDisplay.textContent = "Could not load status.";
-                statusDisplay.className = 'error';
-                serverPortInput.value = DEFAULT_PORT; // Default UI state on error
-            }
-        });
-        // Note: Port request is now part of getPopupData to ensure atomicity
-    }
-
-    // --- Update Status Display ---
-    function updateStatusDisplay(response) {
-        if (!statusDisplay) return;
-        statusDisplay.className = ''; // Reset class
-
-        if (typeof response === 'string') {
-            statusDisplay.textContent = response;
-        } else if (typeof response === 'object' && response !== null) {
-            let text = `Status: ${response.status || 'N/A'}\n`;
-             // Add specific messages for connection tests
-            if (response.action === 'testResult') {
-                text = response.success ? `Connection OK ✅\n` : `Connection Failed ❌\n`;
-                text += `Port: ${response.port_tested}\n`;
-                if(response.working_directory) text += `Server CWD: ${response.working_directory}\n`;
-                 if (response.message) text += `Message: ${response.message}\n`;
-                 statusDisplay.className = response.success ? 'success info' : 'error'; // Use 'info' too
-            } else {
-                // Format regular submit response
-                if (response.message) text += `Message: ${response.message}\n`;
-                if (response.saved_as) text += `Saved As: ${response.saved_as}\n`;
-                if (response.log_file) text += `Log File: ${response.log_file}\n`;
-                if (response.syntax_ok !== undefined && response.syntax_ok !== null) text += `Syntax OK: ${response.syntax_ok}\n`;
-                if (response.run_success !== undefined && response.run_success !== null) text += `Run OK: ${response.run_success}\n`;
-                if (response.git_updated !== undefined) text += `Git Updated: ${response.git_updated}\n`;
-                if (response.save_location) text += `Saved To: ${response.save_location}\n`;
-                if (response.source_file_marker) text += `Marker Found: ${response.source_file_marker}\n`;
-                if (response.detected_language) text += `Detected Lang: ${response.detected_language}\n`;
-
-                // Set class based on overall status
-                if (response.status === 'success' && (response.git_updated === false && response.source_file_marker)) { statusDisplay.className = 'error'; }
-                else if (response.status === 'success') { statusDisplay.className = 'success'; }
-                else if (response.status === 'error' || response.syntax_ok === false || response.run_success === false) { statusDisplay.className = 'error'; }
-            }
-            statusDisplay.textContent = text.trim();
-        } else {
-            statusDisplay.textContent = 'Received unexpected status format.';
-            statusDisplay.className = 'error';
-        }
-    }
-
 
     // --- Event Listeners ---
-    activationToggle.addEventListener('change', (event) => {
-        const isActivated = event.target.checked;
-        chrome.runtime.sendMessage({ action: 'setActivationState', activated: isActivated }, (response) => {
-            if (chrome.runtime.lastError || !response?.success) { console.error("Error setting activation state:", chrome.runtime.lastError?.message || response?.error); }
-            else { console.log("Activation state update acknowledged."); }
-        });
-    });
-
-    let portChangeTimeout;
-    serverPortInput.addEventListener('input', () => {
-        if (!currentTabId) return; // Shouldn't happen if loaded correctly
-
-        clearTimeout(portChangeTimeout);
-        portChangeTimeout = setTimeout(() => {
-            const portValue = serverPortInput.value;
-            const newPort = parseInt(portValue, 10);
-
-            if (!validatePort(portValue)) {
-                 console.warn("Invalid port entered:", portValue);
-                 serverPortInput.classList.add('invalid');
-                 // Optionally briefly show error in status?
-                 // statusDisplay.textContent = "Port must be 1025-65535.";
-                 // statusDisplay.className = 'error';
-                 return;
-            }
+    serverPortInput.addEventListener('change', () => {
+        const port = serverPortInput.value;
+        if (port && port >= 1025 && port <= 65535) {
+            chrome.storage.local.set({ serverPort: port });
             serverPortInput.classList.remove('invalid');
-
-            console.log(`Popup sending new port ${newPort} for Tab ID ${currentTabId}`);
-            chrome.runtime.sendMessage({ action: 'setServerPort', port: newPort, tabId: currentTabId }, (response) => {
-                if (chrome.runtime.lastError || !response?.success) {
-                    console.error("Error setting server port:", chrome.runtime.lastError?.message || response?.error);
-                     updateStatusDisplay({ status: 'error', message: `Error saving port: ${chrome.runtime.lastError?.message || response?.error}` });
-                } else {
-                     console.log("Server port update acknowledged by background for tab", currentTabId);
-                     // updateStatusDisplay({ status: 'info', message: `Port ${newPort} saved for this tab.`}); // Optional confirmation
-                 }
-            });
-        }, 750);
-    });
-
-    testConnectionBtn.addEventListener('click', () => {
-        if (!currentTabId) {
-            updateStatusDisplay({ status: 'error', message: 'Cannot test: Tab ID unknown.' });
-            return;
-        }
-        const portValue = serverPortInput.value;
-        if (!validatePort(portValue)) {
+            // Fetch status immediately when port changes
+            fetchServerStatus();
+        } else {
             serverPortInput.classList.add('invalid');
-            updateStatusDisplay({ status: 'error', message: 'Cannot test: Invalid port.' });
-            return;
-        }
-        serverPortInput.classList.remove('invalid');
-        const portToTest = parseInt(portValue, 10);
-
-        statusDisplay.textContent = `Testing port ${portToTest}...`;
-        statusDisplay.className = 'info';
-        testConnectionBtn.disabled = true; // Disable while testing
-
-        chrome.runtime.sendMessage({ action: 'testServerConnection', port: portToTest, tabId: currentTabId }, (response) => {
-            testConnectionBtn.disabled = false; // Re-enable button
-            if (chrome.runtime.lastError) {
-                 console.error("Error testing connection:", chrome.runtime.lastError.message);
-                 updateStatusDisplay({ status: 'error', message: `Test failed: ${chrome.runtime.lastError.message}` });
-             } else if (response) {
-                 console.log("Received test connection response:", response);
-                 // The updateStatusDisplay function will handle formatting this response object
-                 updateStatusDisplay(response);
-             } else {
-                 console.error("Received no response for test connection.");
-                  updateStatusDisplay({ status: 'error', message: 'Test failed: No response from background script.' });
-             }
-        });
-    });
-
-    // --- Listen for global status updates from the background script ---
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.action === 'updatePopupResponse') {
-            console.log("Popup received global response update:", message.lastResponse);
-            updateStatusDisplay(message.lastResponse);
+            updateStatusDisplay('Invalid port number (must be 1025-65535).', 'error');
+             updateServerDetailsUI(null); // Clear details if port invalid
         }
     });
 
-    // Initial load is triggered after getting tab ID
+    activationToggle.addEventListener('change', () => {
+        chrome.storage.local.set({ isActivated: activationToggle.checked });
+        updateStatusDisplay(`Auto-Capture ${activationToggle.checked ? 'Enabled' : 'Disabled'}.`, 'info');
+    });
+
+    refreshStatusBtn.addEventListener('click', fetchServerStatus);
+
+    saveConfigBtn.addEventListener('click', saveConfiguration);
+
 });
