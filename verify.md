@@ -40,4 +40,52 @@ Okay, here is a summary of the problems fixed during this chat session, phrased 
 23. **Verify that** after server processing, the highlight on the code block in AI Studio changes to green (`.aicapture-success`) or red (`.aicapture-error`) based on the server's response.
 24. **Verify that** the final success/error highlight is eventually removed after a delay.
 
+Okay, here's a summary of the problems addressed during this chat session, framed as verification points:
 
+Verify that the popup window correctly loads and displays the Server Port number from storage or defaults when opened. (Fixed by implementing popup.js and correct message handling in background.js).
+
+Verify that the "Test Connection" button in the popup successfully contacts the server's /test_connection endpoint and displays status information (including the server's actual running port, CWD, and auto-run states) in the popup's status area. (Fixed by adding logic in popup.js and background.js).
+
+Verify that the Server CWD, Save Dir, Log Dir, and Git Repo status are displayed as read-only information in the popup after a successful connection test or initial load. (Fixed by adding elements to popup.html and logic to popup.js to display data fetched from /status).
+
+Verify that the Auto-Run Python and Auto-Run Shell toggles in the popup accurately reflect the currently running state of the server upon initial load (if connected) and after a successful "Test Connection". (Fixed by fetching state from /status in popup.js via background.js).
+
+Verify that changing the Auto-Run Python and Auto-Run Shell toggles in the popup updates the server_config.json file and modifies the currently running server's behavior for subsequent requests without requiring a server restart. (Fixed by updating app.config in routes/config_routes.py and adjusting popup status message).
+
+Verify that the popup status message correctly indicates when a server restart is required (for Port changes) and when it is not required (for Auto-Run flag changes). (Fixed in routes/config_routes.py response and popup.js status update logic).
+
+Verify that the server.py script starts without SyntaxError exceptions related to missing colons in try...except blocks. (Fixed by adding missing colons in helper functions).
+
+Verify that the server.py script starts without NameError: name 'Blueprint' is not defined after refactoring. (Fixed by adding from flask import Blueprint to route files).
+
+Verify that the content.js script uses updated and currently correct CSS selectors to identify code blocks within model responses in AI Studio. (Fixed by analyzing HTML and updating selectors).
+
+Verify that the content.js script correctly debounces its processing of DOM changes to avoid overwhelming the browser or server, mitigating "Resource has been exhausted" errors. (Fixed by re-introducing/adjusting debouncing logic).
+
+Verify that the content.js script only attempts to process and send code blocks that start with the @@FILENAME@@ marker. (Fixed by adding marker check in processCodeBlock).
+
+Verify that the server no longer returns 429 TOO MANY REQUESTS for the /submit_code endpoint, but instead processes requests sequentially by waiting for the processing lock (or using the background batching mechanism implemented last). (Fixed by changing lock acquisition to blocking or implementing the batch processor).
+
+Verify that the visual highlighting feedback (initial yellow, then success green or error red) works correctly on code blocks in AI Studio after they are processed by the extension and server (unless modified by the batching refactor, which changes the feedback loop). (This depends on the selectors, message passing, and highlight logic all working correctly after the fixes).
+
+Okay, here is a summary of the problems addressed and fixed during this chat session, presented in the requested "Verify that..." format:
+
+Verify that the popup window now correctly displays the server port number saved in the extension's settings when it opens (fixing the issue where the port field was initially empty).
+
+Verify that the popup window now includes toggles for "Auto-Run Python" and "Auto-Run Shell" under a "Server Auto-Run Settings" section.
+
+Verify that changing the server auto-run toggles in the popup sends a request to the server's /update_config endpoint, saves the settings to the server_config.json file, and displays a message indicating a server restart is needed for the changes to take effect.
+
+Verify that server.py now starts correctly without the SyntaxError caused by missing colons (:) after try statements within except blocks (specifically within the check_shell_syntax function).
+
+Verify that the extension's content script (content.js) now correctly identifies code blocks in the AI Studio page that start with the @@FILENAME@@ marker, using updated CSS selectors.
+
+Verify that code blocks identified by the content script now receive the initial yellow highlight (.aicapture-highlight).
+
+Verify that after a code block is sent and processed by the server (via /submit_code), the highlight on the code block in AI Studio changes to green (.aicapture-success) or red (.aicapture-error) based on the server's response status.
+
+Verify that the "Auto-Run Python" and "Auto-Run Shell" toggles in the popup now reflect the last known running state of the server, as reported back in responses from the /submit_code or /test_connection endpoints.
+
+Verify that the "Resource has been exhausted" error previously seen in the web page console is less likely to occur, due to the re-introduction of debouncing in the content.js script's MutationObserver.
+
+Testing these points should confirm that the fixes implemented during this session are working correctly.
