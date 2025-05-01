@@ -4,123 +4,115 @@
 <head>
     <title>AI Code Capture</title>
     <style>
-        /* ... (keep most existing styles) ... */
-        body { font-family: sans-serif; width: 320px; padding: 10px; background-color: #f0f0f0; color: #333; }
-        h1, h2 { font-size: 16px; margin-top: 0; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-        h2 { font-size: 14px; margin-top: 15px; margin-bottom: 8px; }
-        .setting-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 5px; border-radius: 4px; transition: background-color 0.2s ease; }
-        .setting-container:hover:not(.no-hover):not(.config-section):not(.info-section) { background-color: #e0e0e0; }
-        .setting-container label { font-weight: bold; margin-right: 10px; flex-shrink: 0; font-size: 13px; min-width: 90px; text-align: right; }
-        .setting-container input[type="number"] { width: 60px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: right; }
-        .setting-container input[type="number"].invalid { border-color: red; }
-        /* Remove button-row specific style if no longer needed */
-        /* .button-row { justify-content: flex-end; } */
-        button#testConnectionBtn {
-            padding: 5px 10px; font-size: 12px; cursor: pointer;
-            background-color: #ddd; border: 1px solid #bbb; border-radius: 3px;
-            margin-left: 8px; /* Add space between input and button */
-            flex-shrink: 0; /* Prevent button from shrinking */
+        /* Compact styling */
+        body { font-family: sans-serif; width: 300px; padding: 8px; background-color: #f0f0f0; color: #333; font-size: 13px; } /* Slightly smaller base font */
+        h1 { font-size: 15px; margin-top: 0; margin-bottom: 10px; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 4px; text-align: center; }
+        h2 { font-size: 13px; margin-top: 10px; margin-bottom: 6px; color: #333; border-bottom: none; padding-bottom: 3px; font-weight: bold; }
+        /* Use grid for better alignment and control */
+        .settings-grid { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; /* Row gap, Column gap */ margin-bottom: 8px; }
+        .settings-grid label { font-weight: bold; text-align: right; grid-column: 1 / 2; }
+        .settings-grid .control-area { grid-column: 2 / 3; display: flex; align-items: center; justify-content: flex-end; } /* Align controls to right */
+        .settings-grid input[type="number"] { width: 55px; padding: 3px; border: 1px solid #ccc; border-radius: 3px; text-align: right; }
+        .settings-grid input[type="number"].invalid { border-color: red; }
+        .settings-grid .info-text { /* Apply to span within grid */
+            font-size: 11px; color: #555; background-color: #eee; padding: 3px 5px; border-radius: 3px;
+            border: 1px solid #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-family: monospace; width: 100%; /* Take available width */ box-sizing: border-box;
         }
+        .settings-grid .info-text.status-true { color: #3c763d; border-color: #d6e9c6; }
+        .settings-grid .info-text.status-false { color: #a94442; border-color: #ebccd1; }
+        button#testConnectionBtn { padding: 4px 8px; font-size: 11px; cursor: pointer; background-color: #ddd; border: 1px solid #bbb; border-radius: 3px; margin-left: 5px; }
         button#testConnectionBtn:hover { background-color: #ccc; }
         button#testConnectionBtn:disabled { background-color: #eee; color: #aaa; cursor: default; }
-        .switch { position: relative; display: inline-block; width: 40px; height: 20px; flex-shrink: 0; }
+        .switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; } /* Smaller switch */
         .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
-        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 18px; }
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; } /* Smaller knob */
         input:checked + .slider { background-color: #4CAF50; }
-        input:checked + .slider:before { transform: translateX(20px); }
+        input:checked + .slider:before { transform: translateX(16px); } /* Adjust slide distance */
         input[disabled] + .slider { background-color: #e0e0e0; cursor: not-allowed; }
         input[disabled] + .slider:before { background-color: #f0f0f0; }
-        #status-container { margin-top: 10px; border-top: 1px solid #ccc; padding-top: 10px; }
-        #status-container h2 { font-size: 14px; margin-bottom: 5px; }
-        #last-response { font-size: 12px; background-color: #fff; border: 1px solid #ddd; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; color: #555; }
+        #status-container { margin-top: 8px; border-top: 1px solid #ccc; padding-top: 8px; }
+        #status-container h2 { font-size: 13px; margin-bottom: 4px; font-weight: bold; }
+        #last-response { font-size: 11px; background-color: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow-y: auto; color: #555; margin-bottom: 0; } /* Reduced max-height */
         #last-response.error { color: #a94442; background-color: #f2dede; border-color: #ebccd1; }
         #last-response.success { color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; }
         #last-response.info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; }
         #last-response.warning { color: #8a6d3b; background-color: #fcf8e3; border-color: #faebcc; }
-        .config-section, .info-section { flex-direction: column; align-items: stretch; border: 1px solid #ddd; border-radius: 5px; padding: 5px 10px 10px 10px; margin-bottom: 10px; background-color: #fff; }
-        .config-section h2, .info-section h2 { margin-top: 5px; border-bottom: none; padding-bottom: 5px; text-align: center; font-size: 13px; color: #555; }
-        .config-section .setting-container, .info-section .setting-container { padding-left: 0; padding-right: 0; margin-bottom: 8px; }
-        .warning-text { font-size: 11px; color: #8a6d3b; text-align: center; margin-top: 5px; }
-        .info-text { font-size: 12px; color: #555; background-color: #eee; padding: 4px 6px; border-radius: 3px; border: 1px solid #ddd; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 5px; font-family: monospace; }
-        .info-text.status-true { color: #3c763d; border-color: #d6e9c6;}
-        .info-text.status-false { color: #a94442; border-color: #ebccd1;}
-        /* New style for the input+button group */
-        .input-button-group {
-            display: flex;
-            align-items: center;
-            flex-grow: 1; /* Allow this group to take space */
-            justify-content: flex-end; /* Align items to the right */
-        }
+        .config-section, .info-section { border: 1px solid #ddd; border-radius: 5px; padding: 5px 8px 8px 8px; margin-bottom: 8px; background-color: #fff; }
+        .config-section h2, .info-section h2 { text-align: left; font-size: 12px; color: #555; margin-bottom: 4px; padding-bottom: 2px; }
+        .config-section .settings-grid, .info-section .settings-grid { margin-bottom: 4px; } /* Reduce gap below last item in section */
+        .warning-text { font-size: 10px; color: #8a6d3b; text-align: center; margin-top: 4px; }
     </style>
 </head>
 <body>
-    <h1>AI Code Capture - Settings</h1>
+    <h1>AI Code Capture</h1>
 
     <!-- Extension Settings -->
-    <h2>Extension Controls</h2>
-    <div class="setting-container no-hover">
-        <label for="serverPort">Server Port:</label>
-        <!-- Group input and button -->
-        <div class="input-button-group">
+    <div class="settings-grid">
+        <label for="serverPort">Port:</label>
+        <div class="control-area">
             <input type="number" id="serverPort" min="1025" max="65535" step="1">
-            <button id="testConnectionBtn">Test</button> <!-- Shortened Text -->
+            <button id="testConnectionBtn">Test</button>
         </div>
-    </div>
-     <!-- Server CWD Display -->
-     <div class="setting-container no-hover">
-         <label>Server CWD:</label> <!-- Removed for attribute -->
-         <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory (read-only)">Loading...</span>
-     </div>
-     <!-- Removed the separate button row -->
-    <div class="setting-container">
-        <label for="activationToggle">Auto-Capture:</label>
-        <label class="switch">
-            <input type="checkbox" id="activationToggle">
-            <span class="slider"></span>
-        </label>
+
+        <label for="activationToggle">Active:</label>
+        <div class="control-area">
+             <label class="switch">
+                <input type="checkbox" id="activationToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
     </div>
 
     <!-- Server Information -->
      <div class="info-section">
-         <h2>Server Information (Read-Only)</h2>
-         <div class="setting-container no-hover">
+         <h2>Backend Info</h2>
+         <div class="settings-grid">
+             <label>Working Dir:</label>
+             <div class="control-area">
+                 <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Loading...</span>
+             </div>
              <label>Save Dir:</label>
-             <span id="serverSaveDirDisplay" class="info-text" title="Directory for non-Git saves (relative to CWD)">Loading...</span>
-         </div>
-         <div class="setting-container no-hover">
+              <div class="control-area">
+                 <span id="serverSaveDirDisplay" class="info-text" title="Fallback save directory (relative)">Loading...</span>
+             </div>
              <label>Log Dir:</label>
-             <span id="serverLogDirDisplay" class="info-text" title="Directory for logs (relative to CWD)">Loading...</span>
-         </div>
-         <div class="setting-container no-hover">
+             <div class="control-area">
+                 <span id="serverLogDirDisplay" class="info-text" title="Log directory (relative)">Loading...</span>
+             </div>
              <label>Git Repo:</label>
-             <span id="serverGitStatusDisplay" class="info-text" title="Is the server running in a Git repo?">Loading...</span>
+             <div class="control-area">
+                 <span id="serverGitStatusDisplay" class="info-text" title="Is CWD a Git repository?">Loading...</span>
+             </div>
          </div>
      </div>
 
     <!-- Server Config Settings -->
     <div class="config-section">
-        <h2>Server Configuration (Requires Server Restart)</h2>
-         <div class="setting-container">
-             <label for="serverEnablePython">Auto-Run Py:</label>
-             <label class="switch">
-                 <input type="checkbox" id="serverEnablePython">
-                 <span class="slider"></span>
-             </label>
-         </div>
-         <div class="setting-container">
-             <label for="serverEnableShell">Auto-Run Sh:</label>
-             <label class="switch">
-                 <input type="checkbox" id="serverEnableShell">
-                 <span class="slider"></span>
-             </label>
-         </div>
-         <p class="warning-text" id="restartWarning" style="display: none;">Config saved. Restart server for changes to take effect.</p>
+        <h2>Backend Config (Live*)</h2>
+         <div class="settings-grid">
+             <label>Auto-Run Py:</label>
+             <div class="control-area">
+                 <label class="switch">
+                     <input type="checkbox" id="serverEnablePython">
+                     <span class="slider"></span>
+                 </label>
+             </div>
+             <label>Auto-Run Sh:</label>
+             <div class="control-area">
+                 <label class="switch">
+                     <input type="checkbox" id="serverEnableShell">
+                     <span class="slider"></span>
+                 </label>
+             </div>
+        </div>
+         <p class="warning-text" id="restartWarning" style="display: none;">*Port change requires server restart.</p> <!-- Simplified warning -->
     </div>
 
     <!-- Status Area -->
     <div id="status-container">
-        <h2>Last Action Status:</h2>
+        <h2>Status</h2> <!-- Simplified header -->
         <pre id="last-response">Loading...</pre>
     </div>
 
