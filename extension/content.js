@@ -1,269 +1,266 @@
 console.log("AI Code Capture content script loaded (v3 - Port aware).");
 
-// --- Storage Keys & Default Port ---
-const ACTIVATION_STORAGE_KEY = 'isActivated';
-const PORT_STORAGE_KEY = 'serverPort'; // Default port key
-const DEFAULT_PORT = 5000;
-let contentScriptPort = DEFAULT_PORT; // Store *default* port initially
-
-// --- Session Storage Key (Now Dynamic based on ACTUAL port used for sending) ---
-// We re-calculate this key just before adding a hash, using the *current* port setting
-// let SESSION_STORAGE_KEY = `aicapture_sent_hashes_v1_PORT_${contentScriptPort}`; // Initial value based on default
-
-// --- Global State ---
-let isExtensionActivated = true; // Assume active until loaded from storage
-const sentCodeBlockHashes = new Set(); // Stores hashes for the *current port's* session
-
-// --- CSS Selectors & Highlight ---
-const targetNodeSelector = 'ms-chat-session ms-autoscroll-container > div';
-const codeElementSelector = 'ms-code-block pre code';
-const modelTurnSelector = 'ms-chat-turn:has(div.chat-turn-container.model)';
-const HIGHLIGHT_INITIAL_CLASS = 'aicapture-highlight'; // Use the original class name
-const HIGHLIGHT_SUCCESS_CLASS = 'aicapture-success';
-const HIGHLIGHT_ERROR_CLASS = 'aicapture-error';
-const HIGHLIGHT_FADEOUT_CLASS = 'aicapture-fadeout';
-const HIGHLIGHT_FINAL_DURATION_MS = 3000;
-const HIGHLIGHT_FADEOUT_DELAY_MS = 2500;
-const highlightTimers = new Map();
+let isActivated = false;
+let serverPort = 5000; // Default, will be updated
+const HIGHLIGHT_CLASS = 'aicapture-highlight';
+const SUCCESS_CLASS = 'aicapture-success';
+const ERROR_CLASS = 'aicapture-error';
+const FADEOUT_CLASS = 'aicapture-fadeout';
 const HIGHLIGHT_ID_ATTR = 'data-aicapture-id';
-let highlightCounter = 0;
+const HIGHLIGHT_STATE_ATTR = 'data-aicapture-state'; // 'initial', 'success', 'error'
+const FADEOUT_DURATION_MS = 600; // Duration for fade-out effect
+const REMOVAL_DELAY_MS = 5000; // How long to keep success/error highlight before removing
 
-// --- Debounce ---
-let debounceTimer;
-const DEBOUNCE_DELAY_MS = 1500;
+// Session storage key for sent hashes (port-specific)
+let sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`;
+let sentHashes = new Set(); // Holds hashes of code blocks already sent in this session for this port
 
-// --- Simple String Hash Function ---
-function hashCode(str) {
-  let hash = 0, i, chr;
-  if (str.length === 0) return hash;
-  for (i = 0; i < str.length; i++) {
-    chr = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + chr;
-    hash |= 0; // Convert to 32bit integer
-  }
-  return hash;
+
+// --- Hash and Storage Functions ---
+
+function simpleHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = (hash << 5) - hash + char;
+        hash |= 0; // Convert to 32bit integer
+    }
+    return hash;
 }
 
-// --- Function to load sent hashes from PORT-SPECIFIC sessionStorage ---
 function loadSentHashes() {
-    sentCodeBlockHashes.clear(); // Clear previous hashes
-    // **Crucially, get the current port setting from storage to build the key**
-    chrome.storage.local.get(PORT_STORAGE_KEY, (result) => {
-        contentScriptPort = result.serverPort !== undefined ? parseInt(result.serverPort, 10) || DEFAULT_PORT : DEFAULT_PORT;
-        SESSION_STORAGE_KEY = `aicapture_sent_hashes_v1_PORT_${contentScriptPort}`;
-        console.log(`Attempting to load hashes for session key: ${SESSION_STORAGE_KEY}`);
-        try {
-            const storedHashes = sessionStorage.getItem(SESSION_STORAGE_KEY);
-            if (storedHashes) {
-                const parsedHashes = JSON.parse(storedHashes);
-                if (Array.isArray(parsedHashes)) {
-                    parsedHashes.forEach(hash => sentCodeBlockHashes.add(hash));
-                    console.log(`Loaded ${sentCodeBlockHashes.size} hashes for port ${contentScriptPort} from sessionStorage.`);
-                } else {
-                     console.warn(`Invalid data in sessionStorage for key ${SESSION_STORAGE_KEY}. Clearing.`);
-                     sessionStorage.removeItem(SESSION_STORAGE_KEY);
-                }
-            } else {
-                console.log(`No hashes found in sessionStorage for port ${contentScriptPort}.`);
-            }
-        } catch (e) {
-            console.error(`Error loading/parsing hashes from sessionStorage (${SESSION_STORAGE_KEY}):`, e);
-            sessionStorage.removeItem(SESSION_STORAGE_KEY);
-        }
-    });
-}
-
-// --- Function to save sent hashes to PORT-SPECIFIC sessionStorage ---
-// Uses the dynamically updated SESSION_STORAGE_KEY
-function saveSentHashes() {
+    sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`; // Update key based on current port
+    console.log("Attempting to load hashes for session key:", sessionKey); // Debug
     try {
-        // Use the SESSION_STORAGE_KEY that was set based on the current port during load/change
-        const hashesArray = Array.from(sentCodeBlockHashes);
-        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(hashesArray));
-        // console.log(`Saved ${hashesArray.length} hashes to ${SESSION_STORAGE_KEY}`);
-    } catch (e) {
-        console.error(`Error saving hashes to sessionStorage (${SESSION_STORAGE_KEY}):`, e);
-    }
-}
-
-
-// --- Highlight Helper --- (Unchanged)
-function applyHighlight(element, state = 'initial') {
-    if (!element) return;
-    const existingTimers = highlightTimers.get(element);
-    if (existingTimers) { clearTimeout(existingTimers.initialTimer); clearTimeout(existingTimers.finalTimer); clearTimeout(existingTimers.fadeTimer); }
-    const currentId = element.getAttribute(HIGHLIGHT_ID_ATTR); // Get ID for logging
-    console.log(`Applying ${state} highlight to element ID: ${currentId}`, element);
-    element.classList.remove(HIGHLIGHT_INITIAL_CLASS, HIGHLIGHT_SUCCESS_CLASS, HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS);
-    let initialTimerId = null, finalTimerId = null, fadeTimerId = null;
-    switch (state) {
-      case 'initial':
-        element.classList.add(HIGHLIGHT_INITIAL_CLASS);
-        initialTimerId = setTimeout(() => {
-             // console.log(`Initial highlight timeout for ID: ${currentId}`);
-             if (!element.classList.contains(HIGHLIGHT_SUCCESS_CLASS) && !element.classList.contains(HIGHLIGHT_ERROR_CLASS)) { element.classList.remove(HIGHLIGHT_INITIAL_CLASS); }
-        }, HIGHLIGHT_FINAL_DURATION_MS * 3); break;
-      case 'success':
-        element.classList.add(HIGHLIGHT_SUCCESS_CLASS);
-        fadeTimerId = setTimeout(() => element.classList.add(HIGHLIGHT_FADEOUT_CLASS), HIGHLIGHT_FADEOUT_DELAY_MS);
-        finalTimerId = setTimeout(() => { element.classList.remove(HIGHLIGHT_SUCCESS_CLASS, HIGHLIGHT_FADEOUT_CLASS); highlightTimers.delete(element); element.removeAttribute(HIGHLIGHT_ID_ATTR); }, HIGHLIGHT_FINAL_DURATION_MS); break;
-      case 'error':
-        element.classList.add(HIGHLIGHT_ERROR_CLASS);
-         fadeTimerId = setTimeout(() => element.classList.add(HIGHLIGHT_FADEOUT_CLASS), HIGHLIGHT_FADEOUT_DELAY_MS);
-        finalTimerId = setTimeout(() => { element.classList.remove(HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS); highlightTimers.delete(element); element.removeAttribute(HIGHLIGHT_ID_ATTR); }, HIGHLIGHT_FINAL_DURATION_MS); break;
-      case 'remove':
-        element.classList.remove(HIGHLIGHT_INITIAL_CLASS, HIGHLIGHT_SUCCESS_CLASS, HIGHLIGHT_ERROR_CLASS, HIGHLIGHT_FADEOUT_CLASS);
-        highlightTimers.delete(element); element.removeAttribute(HIGHLIGHT_ID_ATTR); console.log(`Explicitly removed highlight for element`, element); break;
-    }
-    if (state !== 'remove') { highlightTimers.set(element, { initialTimer: initialTimerId, finalTimer: finalTimerId, fadeTimer: fadeTimerId }); }
-    else { highlightTimers.delete(element); }
-}
-
-// --- Code Processing Function ---
-function findAndSendNewCodeBlocks(target) {
-    if (!isExtensionActivated) { return; } // Check global state first
-    console.log(`Processing turns within target (Activated=${isExtensionActivated}, Port=${contentScriptPort}):`, target);
-
-    const modelTurns = target.querySelectorAll(modelTurnSelector);
-    if (!modelTurns || modelTurns.length === 0) return;
-
-    modelTurns.forEach((turnElement) => {
-        const codeElements = turnElement.querySelectorAll(codeElementSelector);
-        if (!codeElements || codeElements.length === 0) return;
-
-        codeElements.forEach((codeElement) => {
-            if (codeElement.hasAttribute(HIGHLIGHT_ID_ATTR)) { return; } // Skip already processing
-
-            const capturedCode = codeElement.innerText;
-            const trimmedCode = capturedCode?.trim();
-
-            if (trimmedCode?.length > 0) {
-                const codeHash = hashCode(capturedCode);
-                const currentPortSpecificKey = `aicapture_sent_hashes_v1_PORT_${contentScriptPort}`; // Get current key
-
-                // Check against hashes loaded for the *current* port
-                if (!sentCodeBlockHashes.has(codeHash)) {
-                    const uniqueId = `aicapture-${Date.now()}-${highlightCounter++}`;
-                    console.log(` -> Found NEW block (ID: ${uniqueId}, Hash: ${codeHash}). Applying INITIAL highlight & sending...`);
-                    codeElement.setAttribute(HIGHLIGHT_ID_ATTR, uniqueId);
-                    applyHighlight(codeElement, 'initial');
-                    chrome.runtime.sendMessage({
-                        action: 'sendCodeDirectly',
-                        code: capturedCode,
-                        captureId: uniqueId
-                    }).catch(error => {
-                        console.error("Error sending message to background:", error);
-                        applyHighlight(codeElement, 'remove'); // Remove highlight on send failure
-                    });
-                    sentCodeBlockHashes.add(codeHash); // Add to current port's set
-                    saveSentHashes(); // Update session storage for current port
-                } else {
-                   // console.log(` -> Hash ${codeHash} already sent for port ${contentScriptPort}. Skipping.`);
-                }
-            }
-        });
-    });
-    // console.log("Finished processing turns.");
-}
-
-// --- Function to get initial state from background storage ---
-function loadInitialExtensionState() {
-    chrome.storage.local.get([ACTIVATION_STORAGE_KEY, PORT_STORAGE_KEY], (result) => {
-        if (chrome.runtime.lastError) {
-            console.error("Content Script: Error reading initial state:", chrome.runtime.lastError.message);
-            isExtensionActivated = true; // Default on error
-            contentScriptPort = DEFAULT_PORT;
+        const storedHashes = sessionStorage.getItem(sessionKey);
+        if (storedHashes) {
+            sentHashes = new Set(JSON.parse(storedHashes));
+            console.log(`Loaded ${sentHashes.size} hashes for port ${serverPort} from sessionStorage.`); // Debug
         } else {
-            isExtensionActivated = result.isActivated !== undefined ? result.isActivated : true;
-            contentScriptPort = result.serverPort !== undefined ? parseInt(result.serverPort, 10) || DEFAULT_PORT : DEFAULT_PORT;
+            sentHashes = new Set(); // Start fresh if nothing stored for this port
+             console.log(`No hashes found in sessionStorage for port ${serverPort}.`); // Debug
         }
-        console.log(`Content script initial state: Activated=${isExtensionActivated}, Port=${contentScriptPort}`);
-        // Load hashes specific to this initial/default port
-        loadSentHashes();
+    } catch (e) {
+        console.error("Error loading or parsing sent hashes from sessionStorage:", e);
+        sentHashes = new Set(); // Reset on error
+    }
+}
+
+function saveSentHash(hash) {
+    if (sentHashes.has(hash)) return; // Don't re-add
+    sentHashes.add(hash);
+    try {
+        sessionStorage.setItem(sessionKey, JSON.stringify(Array.from(sentHashes)));
+    } catch (e) {
+        console.error("Error saving sent hashes to sessionStorage:", e);
+        // If storage fails, we might send duplicates on reload, but better than crashing
+    }
+}
+
+// --- Highlight Functions ---
+
+function applyHighlight(element, className, captureId) {
+    console.log(`Applying ${className} highlight to element ID: ${captureId}`, element); // Debug
+    // Remove other highlight classes first
+    element.classList.remove(HIGHLIGHT_CLASS, SUCCESS_CLASS, ERROR_CLASS, FADEOUT_CLASS);
+    // Add the new class and the ID attribute
+    element.classList.add(className);
+    element.setAttribute(HIGHLIGHT_ID_ATTR, captureId);
+    if(className === HIGHLIGHT_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'initial');
+    if(className === SUCCESS_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'success');
+    if(className === ERROR_CLASS) element.setAttribute(HIGHLIGHT_STATE_ATTR, 'error');
+
+}
+
+function removeHighlight(element, delayMs = 0) {
+    if (!element) return;
+    const captureId = element.getAttribute(HIGHLIGHT_ID_ATTR);
+    // console.log(`Removing highlight for element ID: ${captureId} after delay ${delayMs}`); // Debug
+
+    setTimeout(() => {
+        if (element) { // Check if element still exists
+            element.classList.add(FADEOUT_CLASS); // Start fade-out transition
+            // After transition, remove all classes and attributes
+             setTimeout(() => {
+                 if (element) {
+                     element.classList.remove(HIGHLIGHT_CLASS, SUCCESS_CLASS, ERROR_CLASS, FADEOUT_CLASS);
+                     element.removeAttribute(HIGHLIGHT_ID_ATTR);
+                     element.removeAttribute(HIGHLIGHT_STATE_ATTR);
+                     // console.log(`Highlight fully removed for ID: ${captureId}`); // Debug
+                 }
+             }, FADEOUT_DURATION_MS);
+        }
+    }, delayMs);
+}
+
+
+// --- Code Processing ---
+
+function processCodeBlock(blockElement) {
+    if (!isActivated || !blockElement) return;
+    if (blockElement.closest('.user-prompt-container')) {
+        // console.log("Skipping code block within user prompt."); // Debug
+        return; // Skip blocks that are part of the user's input
+    }
+    if (blockElement.getAttribute(HIGHLIGHT_ID_ATTR)) {
+        // console.log("Skipping already processed/highlighted block:", blockElement); // Debug
+        return; // Already processed or being processed
+    }
+
+    const codeContent = blockElement.textContent || '';
+    const codeHash = simpleHash(codeContent);
+
+    if (sentHashes.has(codeHash)) {
+        // console.log("Skipping already sent code block (hash match)."); // Debug
+        return; // Skip if already sent in this session for this port
+    }
+
+    const captureId = `aicapture-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    console.log(` -> Found NEW block (ID: ${captureId}, Hash: ${codeHash}). Applying INITIAL highlight & sending...`); // Debug
+
+    applyHighlight(blockElement, HIGHLIGHT_CLASS, captureId);
+    saveSentHash(codeHash); // Mark as sent immediately
+
+    // Send to background script
+    chrome.runtime.sendMessage({
+        action: 'submitCode',
+        code: codeContent,
+        captureId: captureId // Send ID for mapping back
+    }, (response) => {
+         if (chrome.runtime.lastError) {
+             console.error("Error sending code to background:", chrome.runtime.lastError.message);
+              applyHighlight(blockElement, ERROR_CLASS, captureId); // Show error on block
+              removeHighlight(blockElement, REMOVAL_DELAY_MS);
+         } else {
+             // Optional: Handle immediate response from background if needed
+             // console.log("Background ack response:", response);
+         }
     });
 }
 
-// --- Listen for storage changes ---
-chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local') {
-        let stateOrPortChanged = false;
-        if (changes[ACTIVATION_STORAGE_KEY]) {
-            isExtensionActivated = changes[ACTIVATION_STORAGE_KEY].newValue;
-            console.log(`Content script updated activation state: ${isExtensionActivated}`);
-            stateOrPortChanged = true;
+function processAllCodeBlocks(targetNode) {
+    if (!isActivated) return;
+    console.log("Processing turns within target (Activated=" + isActivated + ", Port=" + serverPort + "): ", targetNode); // Debug
+    // Target code blocks within model responses more specifically
+    const codeBlocks = targetNode.querySelectorAll(
+        'ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code' // Target model responses
+    );
+    // console.log(`Found ${codeBlocks.length} potential code blocks.`); // Debug
+    codeBlocks.forEach(processCodeBlock);
+}
+
+// --- Settings Update ---
+
+function updateSettings(newSettings) {
+    let settingsChanged = false;
+    if (newSettings.isActivated !== undefined && newSettings.isActivated !== isActivated) {
+        isActivated = newSettings.isActivated;
+        console.log("Activation status updated:", isActivated);
+        settingsChanged = true;
+        // If activating, maybe trigger a scan?
+        if(isActivated) {
+            console.log("Re-checking code blocks after activation.");
+            processAllCodeBlocks(document);
         }
-        if (changes[PORT_STORAGE_KEY]) {
-            const oldPort = contentScriptPort;
-            const newPort = parseInt(changes[PORT_STORAGE_KEY].newValue, 10) || DEFAULT_PORT;
-            console.log(`Content script detected default port change in storage: ${newPort}`);
-            if (oldPort !== newPort) {
-                contentScriptPort = newPort; // Update internal port variable
-                // Port changed, reload hashes for the new port's session key
-                // This is important for duplicate checking if the user changes the global default
-                // and hasn't set a specific port for this tab via the popup yet.
-                loadSentHashes();
-            }
-            stateOrPortChanged = true;
-        }
-        // Optional: Trigger re-scan only if needed, MutationObserver might be sufficient
-        // if (stateOrPortChanged && isExtensionActivated && targetNode) { findAndSendNewCodeBlocks(targetNode); }
     }
-});
+    if (newSettings.port !== undefined && newSettings.port !== serverPort) {
+        serverPort = newSettings.port;
+        console.log("Server port updated:", serverPort);
+        loadSentHashes(); // Reload hashes for the new port
+        settingsChanged = true;
+    }
+     if (settingsChanged) {
+         console.log("Content script settings updated. Current state: Activated=" + isActivated + ", Port=" + serverPort);
+     }
+}
 
+// --- Initial Load ---
+// Request initial settings from background script
+chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
+    if (chrome.runtime.lastError) {
+        console.error("Error getting initial settings:", chrome.runtime.lastError.message);
+        // Use defaults if background is unavailable on load
+        isActivated = DEFAULT_ACTIVATION;
+        serverPort = DEFAULT_PORT;
+    } else if (response) {
+         console.log("Content script initial state:", response); // Debug
+        updateSettings(response); // Update local state
+    }
+     loadSentHashes(); // Load hashes after getting the initial port
 
-// --- MutationObserver Setup ---
-const targetNode = document.querySelector(targetNodeSelector);
-if (targetNode) {
-    console.log("Target node found:", targetNode, "Setting up MutationObserver.");
-    const callback = function(mutationsList, observer) {
-        let relevantMutationDetected = false;
-        for(const mutation of mutationsList) {
-             if (mutation.type === 'childList' || mutation.type === 'subtree' || mutation.type === 'characterData') {
-                 relevantMutationDetected = true; break;
-             }
-        }
-        if (relevantMutationDetected) {
-             clearTimeout(debounceTimer);
-             debounceTimer = setTimeout(() => {
-                if (isExtensionActivated) {
-                    // console.log("MutationObserver running findAndSendNewCodeBlocks after debounce.");
-                    findAndSendNewCodeBlocks(targetNode);
-                }
-             }, DEBOUNCE_DELAY_MS);
+    // --- Mutation Observer Setup ---
+    // Select the node that contains the chat turns or code blocks
+    // This might need adjustment based on AI Studio's structure
+    const targetNode = document.querySelector('ms-chat-session') || document.body; // Fallback to body
+    if (!targetNode) {
+        console.error("AI Code Capture: Target node for MutationObserver not found.");
+        return;
+    }
+     console.log("Target node found: ", targetNode); // Debug
+
+    const config = { childList: true, subtree: true };
+
+    const callback = (mutationList, observer) => {
+        if (!isActivated) return; // Don't process if not active
+        for (const mutation of mutationList) {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => {
+                    // Check if the added node itself is or contains a code block
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                         // Look for code blocks specifically within model responses
+                        const codeBlocks = node.querySelectorAll('ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code');
+                        if(codeBlocks.length > 0) {
+                            // console.log("MutationObserver detected added nodes containing code blocks:", node); // Debug
+                            codeBlocks.forEach(processCodeBlock);
+                        } else if (node.matches && node.matches('ms-chat-turn.model ms-code-block code, ms-prompt-chunk.model ms-code-block code')) {
+                             // console.log("MutationObserver detected added code block itself:", node); // Debug
+                             processCodeBlock(node);
+                        }
+                    }
+                });
+            }
+            // We could also observe attribute changes if needed, but childList is primary
         }
     };
+
     const observer = new MutationObserver(callback);
-    const config = { childList: true, subtree: true, characterData: true };
-    observer.observe(targetNode, config);
-    console.log("MutationObserver observing.");
+    try {
+        console.log("Setting up MutationObserver."); // Debug
+        observer.observe(targetNode, config);
+         console.log("MutationObserver observing."); // Debug
+    } catch (error) {
+        console.error("Failed to start MutationObserver:", error);
+    }
 
-    // Load initial state FIRST
-    loadInitialExtensionState();
-    console.log("Checking for initial code on page load...");
-    // Check after a short delay
-    setTimeout(() => {
-        if (isExtensionActivated && targetNode) { findAndSendNewCodeBlocks(document); }
-        else if (!targetNode) { console.error("Target node disappeared before initial check?"); }
-        else { console.log("Initial check skipped, extension not activated."); }
-    }, 750); // Slightly longer delay
+    // Initial check in case code is already present
+    console.log("Checking for initial code on page load..."); // Debug
+    if (isActivated) {
+        processAllCodeBlocks(document); // Scan the whole document initially
+    } else {
+        console.log("Initial check skipped, extension not activated."); // Debug
+    }
 
-} else {
-    console.error(`Could not find target node ('${targetNodeSelector}') to observe.`);
-    loadInitialExtensionState(); // Still load state
-}
+}); // End of initial settings request
 
 
-// --- Listener for updates from Background Script ---
+// --- Listen for Messages from Background Script ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'serverProcessingComplete') {
-    console.log("CONTENT SCRIPT: Received 'serverProcessingComplete'", message);
-    const elementId = message.captureId;
-    if (!elementId) { console.warn("Received server response without capture ID."); return false; }
-    const codeElement = document.querySelector(`[${HIGHLIGHT_ID_ATTR}="${elementId}"]`);
-    if (codeElement) {
-      console.log(`Found element ID ${elementId}, applying final highlight (Success: ${message.success})`);
-      applyHighlight(codeElement, message.success ? 'success' : 'error');
-    } else { console.warn(`Could not find element with ID ${elementId} for final highlight.`); }
-  }
-  return false; // No async response needed here
+    // console.log("CONTENT SCRIPT: Received message:", message); // Debug
+    if (message.action === 'serverProcessingComplete') {
+        console.log("CONTENT SCRIPT: Received 'serverProcessingComplete'", message); // Debug
+        const element = document.querySelector(`[${HIGHLIGHT_ID_ATTR}="${message.captureId}"]`);
+        if (element) {
+            console.log(`Found element ID ${message.captureId}, applying final highlight (Success: ${message.success})`); // Debug
+            const finalClass = message.success ? SUCCESS_CLASS : ERROR_CLASS;
+            applyHighlight(element, finalClass, message.captureId);
+            removeHighlight(element, REMOVAL_DELAY_MS); // Remove highlight after delay
+        } else {
+            console.warn(`Content Script: Element with capture ID ${message.captureId} not found for final highlight.`);
+        }
+         // Optional: Send response back to background if needed
+         // sendResponse({status: "Highlight updated"});
+    } else if (message.action === 'settingsUpdated') {
+        console.log("Content Script: Received 'settingsUpdated'", message.newSettings); // Debug
+        updateSettings(message.newSettings);
+    }
 });
