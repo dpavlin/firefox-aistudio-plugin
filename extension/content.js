@@ -67,4 +67,5 @@ function saveSentHash(hash) {
     try {
         sessionKey = `aicapture_sent_hashes_v1_PORT_${serverPort}`;
         sessionStorage.setItem(sessionKey, JSON.stringify(Array.from(sentHashes)));
-    }
+    } catch (e) {
+        console.error("AICapture:
