@@ -6,25 +6,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const activationToggle = document.getElementById('activationToggle');
     const testConnectionBtn = document.getElementById('testConnectionBtn');
     const statusDisplay = document.getElementById('last-response');
+    // New server config elements
+    const enablePythonToggle = document.getElementById('serverEnablePython');
+    const enableShellToggle = document.getElementById('serverEnableShell');
+    const restartWarning = document.getElementById('restartWarning');
+
+    let serverConfigLoaded = false; // Flag to track if server config fetch succeeded
 
     // --- Function to update status display ---
-    function updateStatus(message, type = 'info') {
+    function updateStatus(message, type = 'info', showRestartMsg = false) {
         if (!statusDisplay) return;
-        statusDisplay.textContent = message;
+        // Ensure message is a string
+        let displayMessage = (typeof message === 'string' || message instanceof String) ? message : JSON.stringify(message);
+
+        statusDisplay.textContent = displayMessage;
         statusDisplay.className = ''; // Clear previous classes
-        statusDisplay.classList.add(type); // Add 'info', 'success', or 'error'
-        console.log(`Popup status (${type}):`, message);
+        statusDisplay.classList.add(type); // Add 'info', 'success', 'error', or 'warning'
+
+        // Show/hide restart warning based on flag
+        if (restartWarning) {
+            restartWarning.style.display = showRestartMsg ? 'block' : 'none';
+        }
+        console.log(`Popup status (${type}):`, displayMessage, `Restart Msg: ${showRestartMsg}`);
     }
 
-    // --- Request initial settings from background script ---
-    updateStatus('Loading settings...', 'info');
-    console.log('Popup requesting settings from background...');
+    // --- Disable server config toggles initially ---
+    function setServerTogglesDisabled(disabled) {
+        enablePythonToggle.disabled = disabled;
+        enableShellToggle.disabled = disabled;
+        // Optionally add visual styling for disabled state if not handled by CSS
+    }
+    setServerTogglesDisabled(true); // Disable until loaded
+
+    // --- Request initial EXTENSION settings from background script ---
+    updateStatus('Loading extension settings...', 'info');
+    console.log('Popup requesting extension settings from background...');
     browser.runtime.sendMessage({ action: "getSettings" })
         .then(settings => {
-            console.log('Popup received settings:', settings);
+            console.log('Popup received extension settings:', settings);
+            let portIsValid = false;
             if (settings && settings.port !== undefined) {
                 portInput.value = settings.port;
-                validatePortInput(settings.port); // Validate loaded port
+                portIsValid = validatePortInput(settings.port); // Validate loaded port
             } else {
                 portInput.value = ''; // Clear if port is missing
                  portInput.classList.add('invalid'); // Mark as invalid if missing
@@ -36,15 +59,61 @@ document.addEventListener('DOMContentLoaded', () => {
                 activationToggle.checked = false; // Default to off if missing
                 console.warn('Activation setting missing in response from background.');
             }
-            updateStatus('Settings loaded.', 'info'); // Indicate loading complete
+
+            // Now try to load SERVER config if port is valid
+            if (portIsValid) {
+                 loadServerConfig();
+            } else {
+                updateStatus('Extension settings loaded. Invalid port - cannot load server config.', 'warning');
+            }
         })
         .catch(error => {
-            console.error('Error getting settings from background:', error);
-            updateStatus(`Error loading settings: ${error.message}`, 'error');
+            console.error('Error getting extension settings from background:', error);
+            updateStatus(`Error loading extension settings: ${error.message}`, 'error');
             portInput.classList.add('invalid');
             portInput.value = ''; // Clear on error
             activationToggle.checked = false;
+            setServerTogglesDisabled(true); // Keep server toggles disabled
         });
+
+    // --- Function to Load SERVER Config ---
+    function loadServerConfig() {
+        updateStatus('Loading server configuration...', 'info');
+        console.log('Popup requesting server config from background...');
+        setServerTogglesDisabled(true); // Disable while loading
+
+        browser.runtime.sendMessage({ action: "getServerConfig" })
+            .then(response => {
+                 console.log('Popup received server config response:', response);
+                 if (response && response.success && response.data) {
+                     const config = response.data;
+                     enablePythonToggle.checked = config.auto_run_python || false; // Use current state from server status
+                     enableShellToggle.checked = config.auto_run_shell || false;   // Use current state from server status
+                     updateStatus('Extension and server settings loaded.', 'info');
+                     setServerTogglesDisabled(false); // Enable toggles now
+                     serverConfigLoaded = true;
+                 } else {
+                     // Handle failure to load server config
+                     const errorMsg = response?.error || 'Unknown error fetching server config.';
+                     console.error('Failed to load server config:', errorMsg);
+                     updateStatus(`Could not load server config: ${errorMsg}`, 'error');
+                     // Keep toggles disabled, maybe show default state greyed out?
+                     enablePythonToggle.checked = false;
+                     enableShellToggle.checked = false;
+                     serverConfigLoaded = false;
+                     setServerTogglesDisabled(true);
+                 }
+            })
+            .catch(error => {
+                console.error('Error requesting server config from background:', error);
+                updateStatus(`Error contacting background for server config: ${error.message}`, 'error');
+                enablePythonToggle.checked = false;
+                enableShellToggle.checked = false;
+                serverConfigLoaded = false;
+                setServerTogglesDisabled(true);
+            });
+    }
+
 
     // --- Validate Port Input ---
     function validatePortInput(portValue) {
@@ -61,19 +130,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Listener for Port Input Change ---
     portInput.addEventListener('input', () => {
         const newPort = portInput.value;
+        const wasConfigLoaded = serverConfigLoaded; // Store state before potential reload
+        serverConfigLoaded = false; // Mark server config as potentially stale
+        setServerTogglesDisabled(true); // Disable server toggles until reloaded
+
         if (validatePortInput(newPort)) {
             console.log('Popup sending updated port:', newPort);
             browser.runtime.sendMessage({
                 action: "updateSetting",
                 key: "port",
                 value: parseInt(newPort, 10) // Send as number
+            }).then(() => {
+                 updateStatus(`Port set to ${newPort}. Reloading server config...`, 'info');
+                 // Attempt to reload server config with the new port
+                 loadServerConfig();
             }).catch(error => {
                 console.error('Error sending port update:', error);
                 updateStatus(`Error saving port: ${error.message}`, 'error');
             });
-             updateStatus(`Port set to ${newPort}`, 'info');
         } else {
-             updateStatus('Invalid port number (must be 1025-65535).', 'error');
+             updateStatus('Invalid port number (must be 1025-65535). Cannot load server config.', 'error');
         }
     });
 
@@ -85,12 +161,65 @@ document.addEventListener('DOMContentLoaded', () => {
             action: "updateSetting",
             key: "isActivated",
             value: newState
+        }).then(() => {
+             updateStatus(`Auto-Capture ${newState ? 'Enabled' : 'Disabled'}`, 'info');
         }).catch(error => {
             console.error('Error sending activation update:', error);
             updateStatus(`Error saving toggle state: ${error.message}`, 'error');
          });
-         updateStatus(`Auto-Capture ${newState ? 'Enabled' : 'Disabled'}`, 'info');
     });
+
+    // --- Function to handle server config toggle changes ---
+    function handleServerConfigChange(key, value) {
+        if (!serverConfigLoaded) {
+             console.warn("Server config change ignored as config is not loaded/stale.");
+             updateStatus("Cannot save server config - state may be out of sync.", "error");
+             // Optionally revert the toggle visually?
+             return;
+        }
+        console.log(`Popup sending server config update: ${key}=${value}`);
+        updateStatus('Saving server configuration...', 'info');
+        setServerTogglesDisabled(true); // Disable while saving
+
+        browser.runtime.sendMessage({
+            action: "updateServerConfig",
+            key: key,
+            value: value
+        })
+        .then(response => {
+             console.log("Popup received response for server config update:", response);
+             if (response && response.success) {
+                 updateStatus(response.message || 'Server config saved successfully.', 'success', true); // Show restart message
+             } else {
+                  const errorMsg = response?.message || response?.error || 'Unknown error saving server config.';
+                 updateStatus(`Failed to save server config: ${errorMsg}`, 'error');
+                 // Optionally revert the toggle change if save failed
+                 // Re-enable toggles even on failure so user can retry
+             }
+        })
+        .catch(error => {
+             console.error('Error sending server config update message:', error);
+             updateStatus(`Error contacting background to save config: ${error.message}`, 'error');
+        })
+        .finally(() => {
+             // Re-enable toggles after attempt, unless we are reloading config
+             // If the port changes, loadServerConfig handles re-enabling.
+             // Only re-enable here if it wasn't a port change that triggered this.
+              if (serverConfigLoaded) { // Check flag again in case port changed during save
+                  setServerTogglesDisabled(false);
+              }
+        });
+    }
+
+    // --- Event Listeners for Server Config Toggles ---
+    enablePythonToggle.addEventListener('change', () => {
+        handleServerConfigChange('enable_python_run', enablePythonToggle.checked);
+    });
+
+    enableShellToggle.addEventListener('change', () => {
+        handleServerConfigChange('enable_shell_run', enableShellToggle.checked);
+    });
+
 
     // --- Event Listener for Test Connection Button ---
     testConnectionBtn.addEventListener('click', async () => {
@@ -99,25 +228,28 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Popup requesting connection test...');
 
         try {
+            // Test connection uses the *current* extension port setting
             const response = await browser.runtime.sendMessage({ action: "testConnection" });
             console.log('Popup received test connection response:', response);
 
             if (response && response.success) {
-                // Use status info if available, otherwise generic success
-                const serverStatus = response.data; // Assuming background sends server status data
-                 let statusMsg = `Connection successful!\nServer Status:\n`;
-                 if (serverStatus) {
-                     statusMsg += `  Port: ${serverStatus.port}\n`;
-                     statusMsg += `  Git Repo: ${serverStatus.is_git_repo}\n`;
-                     statusMsg += `  Auto Run Py: ${serverStatus.auto_run_python}\n`;
-                     statusMsg += `  Auto Run Shell: ${serverStatus.auto_run_shell}`;
-                 } else {
-                     statusMsg = 'Connection successful! (No detailed status returned)';
+                 const serverStatus = response.data; // Server status data
+                 let statusMsg = `Connection successful!\n`;
+                 statusMsg += `Server running on port ${serverStatus?.port || '?'}.\n`; // Use status port
+                 statusMsg += `Python Auto-Run: ${serverStatus?.auto_run_python ?? '?'}\n`; // Use status value
+                 statusMsg += `Shell Auto-Run: ${serverStatus?.auto_run_shell ?? '?'}\n`;   // Use status value
+                 statusMsg += `(This reflects the RUNNING server state)`;
+
+                 updateStatus(statusMsg, 'success');
+                 // Optionally re-sync UI toggles if server state differs? Or trust loadServerConfig.
+                 // Maybe just reload server config after successful test?
+                 if (serverConfigLoaded) { // Only if we were loaded before
+                     loadServerConfig(); // Re-sync server config UI after test
                  }
-                updateStatus(statusMsg, 'success');
+
             } else {
-                // Handle specific errors if background provides them
                  let errorMsg = 'Connection failed.';
+                 // (Error handling remains the same as before)
                  if (response && response.error) {
                      errorMsg += `\nReason: ${response.error}`;
                  } else if (response && response.message) { // If background just sent back the server's error message
@@ -127,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  } else {
                     errorMsg += ' Check if server is running on the correct port and accessible.';
                  }
-                updateStatus(errorMsg, 'error');
+                 updateStatus(errorMsg, 'error');
             }
         } catch (error) {
             console.error('Error during test connection message:', error);
@@ -137,16 +269,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-     // --- Listener for status updates from background (optional but good) ---
+     // --- Listener for status updates from background ---
      browser.runtime.onMessage.addListener((message, sender) => {
-         // Only process messages relevant to the popup's status display
          if (message.action === "updatePopupStatus") {
              console.log("Popup received status update from background:", message);
              updateStatus(message.message, message.type || 'info');
-             return Promise.resolve(); // Indicate message processed asynchronously if needed
+             return Promise.resolve();
          }
-         // Ignore other messages intended for content scripts etc.
-         return false; // Indicate message not handled by this listener
+         return false;
      });
 
 });

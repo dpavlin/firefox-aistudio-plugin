@@ -1,14 +1,15 @@
-<!-- @@FILENAME@@ popup.html -->
+<!-- @@FILENAME@@ extension/popup.html -->
 <!DOCTYPE html>
 <html>
 <head>
     <title>AI Code Capture</title>
     <style>
-        body { font-family: sans-serif; width: 300px; padding: 10px; background-color: #f0f0f0; color: #333; }
-        h1 { font-size: 16px; margin-top: 0; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+        body { font-family: sans-serif; width: 320px; padding: 10px; background-color: #f0f0f0; color: #333; }
+        h1, h2 { font-size: 16px; margin-top: 0; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+        h2 { font-size: 14px; margin-top: 15px; margin-bottom: 8px; }
         .setting-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 5px; border-radius: 4px; transition: background-color 0.2s ease; }
-        .setting-container:hover:not(.no-hover):not(.button-row) { background-color: #e0e0e0; } /* Don't highlight button row */
-        .setting-container label { font-weight: bold; margin-right: 10px; flex-shrink: 0; }
+        .setting-container:hover:not(.no-hover):not(.button-row):not(.config-section) { background-color: #e0e0e0; } /* Don't highlight button row or section */
+        .setting-container label { font-weight: bold; margin-right: 10px; flex-shrink: 0; font-size: 13px; }
         .setting-container input[type="number"] {
             width: 60px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: right;
         }
@@ -28,6 +29,8 @@
         .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: #4CAF50; }
         input:checked + .slider:before { transform: translateX(20px); }
+        input[disabled] + .slider { background-color: #e0e0e0; cursor: not-allowed; } /* Disabled switch style */
+        input[disabled] + .slider:before { background-color: #f0f0f0; }
 
         /* Status Area */
         #status-container { margin-top: 10px; border-top: 1px solid #ccc; padding-top: 10px; }
@@ -36,20 +39,26 @@
         #last-response.error { color: #a94442; background-color: #f2dede; border-color: #ebccd1; }
         #last-response.success { color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; }
         #last-response.info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; } /* Style for info/test */
+        #last-response.warning { color: #8a6d3b; background-color: #fcf8e3; border-color: #faebcc; } /* Style for warnings like restart needed */
+
+        .config-section { flex-direction: column; align-items: stretch; }
+        .config-section .setting-container { padding-left: 0; padding-right: 0;}
+        .warning-text { font-size: 11px; color: #8a6d3b; text-align: center; margin-top: 5px; }
+
     </style>
 </head>
 <body>
-    <h1>AI Code Capture</h1>
+    <h1>AI Code Capture - Settings</h1>
 
+    <!-- Extension Settings -->
+    <h2>Extension Controls</h2>
     <div class="setting-container no-hover">
         <label for="serverPort">Server Port:</label>
         <input type="number" id="serverPort" min="1025" max="65535" step="1">
     </div>
-
-     <div class="setting-container button-row"> <!-- New row for the button -->
+     <div class="setting-container button-row"> <!-- Row for the test button -->
          <button id="testConnectionBtn">Test Connection</button>
      </div>
-
     <div class="setting-container">
         <label for="activationToggle">Auto-Capture:</label>
         <label class="switch">
@@ -58,6 +67,28 @@
         </label>
     </div>
 
+    <!-- Server Config Settings -->
+    <div class="config-section">
+        <h2>Server Configuration (Requires Server Restart)</h2>
+         <div class="setting-container">
+             <label for="serverEnablePython">Auto-Run Python:</label>
+             <label class="switch">
+                 <input type="checkbox" id="serverEnablePython">
+                 <span class="slider"></span>
+             </label>
+         </div>
+         <div class="setting-container">
+             <label for="serverEnableShell">Auto-Run Shell:</label>
+             <label class="switch">
+                 <input type="checkbox" id="serverEnableShell">
+                 <span class="slider"></span>
+             </label>
+         </div>
+         <p class="warning-text" id="restartWarning" style="display: none;">Configuration saved. Restart server for changes to take effect.</p>
+    </div>
+
+
+    <!-- Status Area -->
     <div id="status-container">
         <h2>Last Action Status:</h2>
         <pre id="last-response">Loading...</pre>
@@ -66,3 +97,4 @@
     <script src="popup.js"></script>
 </body>
 </html>
+<!-- @@FILENAME@@ extension/popup.html -->
