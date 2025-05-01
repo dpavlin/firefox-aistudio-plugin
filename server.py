@@ -259,4 +259,315 @@ def find_tracked_file_by_name(basename_to_find: str) -> str | None:
         tracked_files = result.stdout.splitlines()
         matches = [f for f in tracked_files if Path(f).name == basename_to_find]
 
-        if len(matches) == 1: print(f"Info: Found unique tracked file match: '{matches[0]}'",
+        if len(matches) == 1: print(f"Info: Found unique tracked file match: '{matches[0]}'", file=sys.stderr); return matches[0]
+        elif len(matches) > 1: print(f"W: Ambiguous filename marker '{basename_to_find}'. Found multiple: {matches}.", file=sys.stderr); return None
+        else: print(f"Info: No tracked file with exact basename '{basename_to_find}' found.", file=sys.stderr); return None
+    except subprocess.TimeoutExpired: print("W: Git ls-files check timed out.", file=sys.stderr); return None
+    except Exception as e: print(f"E: checking Git for file '{basename_to_find}': {e}", file=sys.stderr); return None
+
+def is_git_tracked(filepath_relative_to_repo: str) -> bool:
+    """Checks if a specific relative path is tracked by Git."""
+    if not IS_REPO: return False
+    try:
+        git_path = Path(filepath_relative_to_repo).as_posix()
+        command = ['git', 'ls-files', '--error-unmatch', git_path]
+        subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8', cwd=SERVER_DIR, timeout=5)
+        return True
+    except subprocess.CalledProcessError: return False # Specifically means not tracked
+    except subprocess.TimeoutExpired: print(f"W: Git track status check timed out for '{filepath_relative_to_repo}'.", file=sys.stderr); return False
+    except Exception as e: print(f"E: checking Git track status for '{filepath_relative_to_repo}': {e}", file=sys.stderr); return False
+
+def update_and_commit_file(filepath_absolute: Path, code_content: str, marker_filename: str) -> bool:
+    """Writes content, stages, and commits if tracked and changed."""
+    if not IS_REPO: return False
+    try:
+        filepath_relative_to_repo_str = str(filepath_absolute.relative_to(SERVER_DIR))
+        git_path_posix = filepath_absolute.relative_to(SERVER_DIR).as_posix()
+        filepath_absolute.parent.mkdir(parents=True, exist_ok=True)
+        current_content = ""
+        if filepath_absolute.exists():
+             try: current_content = filepath_absolute.read_text(encoding='utf-8')
+             except Exception as read_e: print(f"W: Could not read {filepath_relative_to_repo_str} to check for changes: {read_e}", file=sys.stderr)
+        if code_content == current_content:
+             print(f"Info: Content for '{filepath_relative_to_repo_str}' unchanged. Skipping commit.", file=sys.stderr)
+             return True
+
+        print(f"Info: Overwriting local file: {filepath_relative_to_repo_str}", file=sys.stderr)
+        filepath_absolute.write_text(code_content, encoding='utf-8')
+
+        print(f"Running: git add '{git_path_posix}' from {SERVER_DIR}", file=sys.stderr)
+        add_result = subprocess.run(['git', 'add', git_path_posix], capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR, timeout=10)
+        if add_result.returncode != 0: print(f"E: 'git add' failed: {add_result.stderr}", file=sys.stderr); return False
+
+        commit_message = f"Update {marker_filename} from AI Code Capture"
+        print(f"Running: git commit -m \"{commit_message}\" '{git_path_posix}' ...", file=sys.stderr)
+        commit_result = subprocess.run(['git', 'commit', '-m', commit_message, '--', git_path_posix], capture_output=True, text=True, check=False, encoding='utf-8', cwd=SERVER_DIR, timeout=15)
+
+        if commit_result.returncode == 0: print(f"Success: Committed changes for {git_path_posix}.", file=sys.stderr); return True
+        else:
+             no_changes = ["nothing to commit", "no changes added to commit", "nothing added to commit but untracked files present"]
+             output = commit_result.stdout + commit_result.stderr
+             if any(p in output for p in no_changes): print(f"Info: No effective changes for commit on {git_path_posix}.", file=sys.stderr); return True
+             else: print(f"E: 'git commit' failed:\n{output}", file=sys.stderr); return False
+    except Exception as e: print(f"E: during Git update/commit: {e}", file=sys.stderr); return False
+
+def run_script(filepath: str, script_type: str):
+    """Runs a Python or Shell script, logs output."""
+    filepath_obj = Path(filepath).resolve() # Use absolute path for robustness
+    filename_base = filepath_obj.stem
+    logpath = LOG_FOLDER_PATH / f"{filename_base}_{script_type}_run.log"
+    run_cwd = filepath_obj.parent
+    os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
+
+    command = []
+    interpreter_name = ""
+    if script_type == 'python':
+        python_exe = sys.executable or shutil.which("python3") or "python"
+        command = [python_exe, str(filepath_obj)] # Pass absolute path
+        interpreter_name = Path(python_exe).name
+        print(f"Executing Python: {' '.join(command)} in {run_cwd}", file=sys.stderr)
+    elif script_type == 'shell':
+        shell_exe = shutil.which("bash") or shutil.which("sh") or "bash"
+        command = [shell_exe, str(filepath_obj)] # Pass absolute path
+        interpreter_name = Path(shell_exe).name
+        print(f"Executing Shell ({interpreter_name}): {' '.join(command)} in {run_cwd}", file=sys.stderr)
+    else:
+        print(f"E: Cannot run script of type '{script_type}' for {filepath}", file=sys.stderr); return False, None
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15, encoding='utf-8', check=False, cwd=run_cwd)
+        with open(logpath, 'w', encoding='utf-8') as f:
+            f.write(f"--- COMMAND ---\n{' '.join(command)}\n--- CWD ---\n{run_cwd}\n"); f.write(f"--- STDOUT ---\n{result.stdout}\n"); f.write(f"--- STDERR ---\n{result.stderr}\n"); f.write(f"--- Return Code: {result.returncode} ---\n")
+        print(f"Exec finished ({script_type}). RC: {result.returncode}. Log: {logpath.name}", file=sys.stderr)
+        return result.returncode == 0, str(logpath)
+    except subprocess.TimeoutExpired: print(f"E: Script timed out: {filepath}", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Script timed out.\n"); return False, str(logpath)
+    except FileNotFoundError: print(f"E: Interpreter '{interpreter_name}' or script not found.", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Interpreter or script not found.\n"); return False, str(logpath)
+    except Exception as e: print(f"E: running script {filepath}: {e}", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write(f"Error: {e}\n"); return False, str(logpath)
+
+def check_shell_syntax(filepath: str) -> tuple[bool, str | None]:
+    """Checks shell script syntax using 'bash -n'. Returns (syntax_ok, log_path)."""
+    filepath_obj = Path(filepath).resolve()
+    filename_base = filepath_obj.stem
+    logpath = LOG_FOLDER_PATH / f"{filename_base}_shell_syntax.log"
+    os.makedirs(LOG_FOLDER_PATH, exist_ok=True)
+    checker_exe = shutil.which("bash") or "bash"
+    command = [checker_exe, '-n', str(filepath_obj)] # Use absolute path
+
+    print(f"Checking Shell syntax: {' '.join(command)}", file=sys.stderr)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10, encoding='utf-8', check=False)
+        syntax_ok = result.returncode == 0
+        with open(logpath, 'w', encoding='utf-8') as f:
+             f.write(f"--- COMMAND ---\n{' '.join(command)}\n"); status_msg = "OK" if syntax_ok else f"ERROR (RC: {result.returncode})"; f.write(f"--- STATUS: {status_msg} ---\n"); f.write(f"--- STDOUT ---\n{result.stdout}\n"); f.write(f"--- STDERR ---\n{result.stderr}\n")
+        if syntax_ok: print(f"Shell syntax OK for {filepath_obj.name}", file=sys.stderr); return True, str(logpath)
+        else: print(f"Shell syntax Error for {filepath_obj.name}. RC: {result.returncode}. Log: {logpath.name}", file=sys.stderr); return False, str(logpath)
+    except FileNotFoundError: print(f"E: Syntax check command not found: '{checker_exe}'", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Syntax checker not found.\n"); return False, str(logpath)
+    except subprocess.TimeoutExpired: print(f"E: Shell syntax check timed out: {filepath}", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write("Error: Syntax check timed out.\n"); return False, str(logpath)
+    except Exception as e: print(f"E: checking shell syntax for {filepath}: {e}", file=sys.stderr); with open(logpath, 'w', encoding='utf-8') as f: f.write(f"Error: {e}\n"); return False, str(logpath)
+
+# --- Route Definitions ---
+
+@app.route('/status', methods=['GET'])
+def get_status():
+    """Returns current server status and configuration."""
+    # print("Received /status request", file=sys.stderr) # Less verbose
+    status_data = {
+        'status': 'running',
+        'working_directory': str(SERVER_DIR),
+        'save_directory': str(SAVE_FOLDER_PATH.relative_to(SERVER_DIR)),
+        'log_directory': str(LOG_FOLDER_PATH.relative_to(SERVER_DIR)),
+        'is_git_repo': IS_REPO,
+        'port': SERVER_PORT,
+        'auto_run_python': AUTO_RUN_PYTHON_ON_SYNTAX_OK, # Report effective running state
+        'auto_run_shell': AUTO_RUN_SHELL_ON_SYNTAX_OK,    # Report effective running state
+        'config_file_exists': CONFIG_FILE.is_file()
+    }
+    return jsonify(status_data)
+
+@app.route('/update_config', methods=['POST'])
+def update_config():
+    """Updates the server_config.json file with settings from the request."""
+    if not request.is_json: return jsonify({'status': 'error', 'message': 'Request must be JSON'}), 400
+    data = request.get_json(); print(f"Received /update_config request data: {data}", file=sys.stderr)
+    config_to_save = load_config()
+    python_run = data.get('auto_run_python'); shell_run = data.get('auto_run_shell')
+    updated = False
+    if python_run is not None and isinstance(python_run, bool) and config_to_save.get('enable_python_run') != python_run:
+        config_to_save['enable_python_run'] = python_run; updated = True; print(f"Config update: set enable_python_run to {python_run}", file=sys.stderr)
+    if shell_run is not None and isinstance(shell_run, bool) and config_to_save.get('enable_shell_run') != shell_run:
+        config_to_save['enable_shell_run'] = shell_run; updated = True; print(f"Config update: set enable_shell_run to {shell_run}", file=sys.stderr)
+
+    if updated:
+        if save_config(config_to_save): return jsonify({'status': 'success', 'message': f'Config saved to {CONFIG_FILE.name}. Restart server for changes.', 'saved_config': config_to_save})
+        else: return jsonify({'status': 'error', 'message': 'Failed to save config file.'}), 500
+    else: print("Info: No config changes requested.", file=sys.stderr); return jsonify({'status': 'success', 'message': 'No changes detected. Config file not modified.', 'saved_config': config_to_save})
+
+@app.route('/submit_code', methods=['POST', 'OPTIONS'])
+def submit_code():
+    if request.method == 'OPTIONS': return '', 204
+    if request.method == 'POST':
+        with request_lock:
+            print("--- Handling /submit_code request ---", file=sys.stderr)
+            data = request.get_json();
+            if not data: print("E: No JSON data.", file=sys.stderr); return jsonify({'status': 'error', 'message': 'No JSON data'}), 400
+            received_code = data.get('code', '');
+            if not received_code or received_code.isspace(): print("E: Empty code.", file=sys.stderr); return jsonify({'status': 'error', 'message': 'Empty code'}), 400
+
+            save_filepath_str = None; final_save_filename = None; code_to_save = received_code
+            extracted_filename_raw = None; detected_language_name = "Unknown"
+            marker_line_length = 0; was_git_updated = False; sanitized_path_from_marker = None
+            save_target = "fallback"; absolute_path_target = None
+
+            match = FILENAME_EXTRACT_REGEX.search(received_code)
+            if match:
+                extracted_filename_raw = match.group(1).strip(); marker_line_length = match.end()
+                if marker_line_length < len(received_code) and received_code[marker_line_length] == '\n': marker_line_length += 1
+                print(f"Info: Found marker: '{extracted_filename_raw}'", file=sys.stderr)
+                sanitized_path_from_marker = sanitize_filename(extracted_filename_raw)
+
+                if sanitized_path_from_marker:
+                    print(f"Info: Sanitized path: '{sanitized_path_from_marker}'", file=sys.stderr)
+                    if IS_REPO:
+                        git_path_to_check = sanitized_path_from_marker
+                        if '/' not in sanitized_path_from_marker.replace('\\', '/'):
+                            found_rel_path = find_tracked_file_by_name(sanitized_path_from_marker)
+                            if found_rel_path: git_path_to_check = found_rel_path
+                            # else: keep original sanitized name
+
+                        absolute_path_target = (SERVER_DIR / git_path_to_check).resolve()
+                        if not str(absolute_path_target).startswith(str(SERVER_DIR)):
+                            print(f"W: Path '{absolute_path_target}' outside server dir. Blocking Git.", file=sys.stderr); absolute_path_target = None
+                        else:
+                            is_tracked = is_git_tracked(git_path_to_check)
+                            if is_tracked:
+                                print(f"Info: Target '{git_path_to_check}' is tracked. Attempting commit.", file=sys.stderr)
+                                code_to_save = received_code[marker_line_length:]
+                                commit_success = update_and_commit_file(absolute_path_target, code_to_save, git_path_to_check)
+                                if commit_success:
+                                    save_filepath_str = str(absolute_path_target); final_save_filename = git_path_to_check; was_git_updated = True; save_target = "git"
+                                else: print(f"W: Git commit failed for {git_path_to_check}. Saving fallback.", file=sys.stderr); code_to_save = received_code; absolute_path_target = None
+                            else: print(f"Info: Path '{git_path_to_check}' not tracked. Saving locally.", file=sys.stderr); code_to_save = received_code
+                    else: # Not Git repo
+                         print(f"Info: Not Git repo. Saving using marker path '{sanitized_path_from_marker}'.", file=sys.stderr)
+                         absolute_path_target = (SAVE_FOLDER_PATH / sanitized_path_from_marker).resolve()
+                         if not str(absolute_path_target).startswith(str(SAVE_FOLDER_PATH)):
+                              print(f"W: Fallback path '{absolute_path_target}' outside save folder. Using timestamped.", file=sys.stderr); absolute_path_target = None
+                         else: code_to_save = received_code
+                else: print(f"W: Invalid marker filename '{extracted_filename_raw}'. Using fallback.", file=sys.stderr); absolute_path_target = None
+            else: print("Info: No marker found. Using fallback.", file=sys.stderr); absolute_path_target = None
+
+            if save_target == "fallback":
+                if absolute_path_target: # Use path from marker (untracked file or non-git)
+                     save_filepath_str = str(absolute_path_target)
+                     final_save_filename = Path(save_filepath_str).relative_to(SAVE_FOLDER_PATH).as_posix() if str(save_filepath_str).startswith(str(SAVE_FOLDER_PATH)) else Path(save_filepath_str).name
+                     ext = Path(save_filepath_str).suffix.lower();
+                     if ext == '.py': detected_language_name = "Python"
+                     elif ext == '.sh': detected_language_name = "Shell"
+                     else: detected_language_name = "From Marker Path"
+                else: # Generate timestamped
+                     base_name = "code"; ext = DEFAULT_EXTENSION
+                     if sanitized_path_from_marker: p = Path(sanitized_path_from_marker); base_name = p.stem if p.stem else "code"; ext = p.suffix if p.suffix else DEFAULT_EXTENSION; detected_language_name = "From Marker (Invalid)"
+                     else: ext, detected_language_name = detect_language_and_extension(code_to_save)
+                     if detected_language_name not in ["Unknown", "Text", "From Marker (Invalid)", "From Marker Path"]: base_name = detected_language_name.lower().replace(" ", "_")
+                     save_filepath_str = generate_timestamped_filepath(extension=ext, base_prefix=base_name)
+                     final_save_filename = Path(save_filepath_str).name
+
+                print(f"Info: Saving fallback to: '{save_filepath_str}'", file=sys.stderr)
+                try:
+                    save_path_obj = Path(save_filepath_str); save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                    save_path_obj.write_text(code_to_save, encoding='utf-8')
+                    print(f"Success: Code saved to {save_filepath_str}", file=sys.stderr)
+                except Exception as e: print(f"E: Failed to save fallback '{save_filepath_str}': {str(e)}", file=sys.stderr); return jsonify({'status': 'error', 'message': f'Failed to save file: {str(e)}'}), 500
+
+            syntax_ok = None; run_success = None; log_filename = None; script_type = None
+            if not save_filepath_str: print("E: save_filepath_str empty before checks!", file=sys.stderr); return jsonify({'status': 'error', 'message': 'Internal save path error.'}), 500
+
+            check_filename = final_save_filename if save_target == 'git' else Path(save_filepath_str).name
+            file_extension = Path(check_filename).suffix.lower()
+
+            if file_extension == '.py':
+                script_type = 'python'; is_server_script = Path(save_filepath_str).resolve() == (SERVER_DIR / THIS_SCRIPT_NAME).resolve()
+                if is_server_script: print(f"Info: Skipping run checks for server script '{check_filename}'.", file=sys.stderr)
+                else: print(f"Info: Checking Python file '{check_filename}'...", file=sys.stderr)
+                try:
+                    compile(code_to_save, save_filepath_str, 'exec'); syntax_ok = True; print("Syntax OK.", file=sys.stderr)
+                    if not is_server_script and AUTO_RUN_PYTHON_ON_SYNTAX_OK:
+                        print(f"Info: Attempting run (Python auto-run enabled).", file=sys.stderr); run_success, logpath = run_script(save_filepath_str, 'python'); log_filename = Path(logpath).name if logpath else None; print(f"Info: Run complete. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
+                    elif not is_server_script: print("Info: Python auto-run disabled.", file=sys.stderr)
+                except SyntaxError as e:
+                    syntax_ok = False; print(f"Syntax Error: L{e.lineno} C{e.offset} {e.msg}", file=sys.stderr); log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_py_syntax_error.log"; try: log_path_err.write_text(f"Python Syntax Error:\nFile: {check_filename}\nLine: {e.lineno}, Offset: {e.offset}\nMsg: {e.msg}\nContext:\n{e.text}", encoding='utf-8'); log_filename = log_path_err.name; except Exception as log_e: print(f"E: writing syntax log: {log_e}", file=sys.stderr)
+                except Exception as compile_e:
+                    syntax_ok = False; run_success = False; print(f"Python compile/run setup error: {compile_e}", file=sys.stderr); log_fn_base = Path(save_filepath_str).stem; log_path_err = LOG_FOLDER_PATH / f"{log_fn_base}_py_compile_error.log"; try: log_path_err.write_text(f"Python Compile/Run Setup Error:\nFile: {check_filename}\nError: {compile_e}\n", encoding='utf-8'); log_filename = log_path_err.name; except Exception as log_e: print(f"E: writing compile log: {log_e}", file=sys.stderr)
+
+            elif file_extension == '.sh':
+                 script_type = 'shell'; print(f"Info: Checking Shell file '{check_filename}'...", file=sys.stderr)
+                 syntax_ok, syntax_log_path = check_shell_syntax(save_filepath_str)
+                 if syntax_log_path: log_filename = Path(syntax_log_path).name
+                 if syntax_ok:
+                      if AUTO_RUN_SHELL_ON_SYNTAX_OK:
+                           print(f"Info: Attempting run (Shell auto-run enabled).", file=sys.stderr); run_success, run_log_path = run_script(save_filepath_str, 'shell'); log_filename = Path(run_log_path).name if run_log_path else log_filename; print(f"Info: Run complete. Success: {run_success}, Log: {log_filename}", file=sys.stderr)
+                      else: print("Info: Shell auto-run disabled.", file=sys.stderr)
+                 else: run_success = False; print(f"Info: Shell syntax error prevented run. Log: {log_filename}", file=sys.stderr)
+
+            else: print(f"Info: File '{check_filename}' not Python/Shell, skipping checks.", file=sys.stderr)
+
+            response_data = {'status': 'success', 'saved_as': final_save_filename, 'saved_path': str(Path(save_filepath_str).relative_to(SERVER_DIR)) if save_filepath_str else None, 'log_file': log_filename, 'syntax_ok': syntax_ok, 'run_success': run_success, 'script_type': script_type, 'source_file_marker': extracted_filename_raw, 'git_updated': was_git_updated, 'save_location': save_target, 'detected_language': detected_language_name if save_target == 'fallback' and not absolute_path_target else None}
+            print(f"Sending response: {response_data}", file=sys.stderr)
+            print("--- Request complete ---", file=sys.stderr)
+            return jsonify(response_data)
+    return jsonify({'status': 'error', 'message': f'Unsupported method: {request.method}'}), 405
+
+
+@app.route('/test_connection', methods=['GET'])
+def test_connection():
+    return get_status()
+
+# --- Log Routes ---
+@app.route('/logs')
+def list_logs():
+    log_files = []; template = '''<!DOCTYPE html><html><head><title>Logs Browser</title><style>body{font-family:Arial,sans-serif;background:#1e1e1e;color:#d4d4d4;padding:20px}h1{color:#4ec9b0;border-bottom:1px solid #444;padding-bottom:10px}ul{list-style:none;padding:0}li{background:#252526;margin-bottom:8px;border-radius:4px}li a{color:#9cdcfe;text-decoration:none;display:block;padding:10px 15px;transition:background-color .2s ease}li a:hover{background-color:#333}p{color:#888}pre{background:#1e1e1e;border:1px solid #444;padding:15px;border-radius:5px;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word;color:#d4d4d4}</style></head><body><h1>🗂️ Available Logs</h1>{% if logs %}<ul>{% for log in logs %}<li><a href="/logs/{{ log | urlencode }}">{{ log }}</a></li>{% endfor %}</ul>{% else %}<p>No logs found in '{{ log_folder_name }}'.</p>{% endif %}</body></html>'''
+    try:
+         log_paths = [p for p in LOG_FOLDER_PATH.glob('*.log') if p.is_file()]
+         log_paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+         log_files = [p.name for p in log_paths]
+    except FileNotFoundError: pass
+    except Exception as e: print(f"Error listing logs: {e}", file=sys.stderr)
+    return render_template_string(template, logs=log_files, log_folder_name=LOG_FOLDER)
+
+@app.route('/logs/<path:filename>')
+def serve_log(filename):
+    if '..' in filename or filename.startswith('/'): print(f"W: Forbidden log access: {filename}", file=sys.stderr); return "Forbidden", 403
+    # print(f"Request for log file: {filename}", file=sys.stderr) # Verbose
+    try:
+        log_dir = LOG_FOLDER_PATH.resolve(); requested_path = (log_dir / filename).resolve()
+        if not str(requested_path).startswith(str(log_dir)): print(f"W: Forbidden log path: {filename}", file=sys.stderr); return "Forbidden", 403
+        return send_from_directory(LOG_FOLDER_PATH, filename, mimetype='text/plain', as_attachment=False)
+    except FileNotFoundError: return "Log file not found", 404
+    except Exception as e: print(f"Error serving log {filename}: {e}", file=sys.stderr); return "Error serving file", 500
+
+# --- Main Execution ---
+if __name__ == '__main__':
+    host_ip = '127.0.0.1'; port_num = SERVER_PORT
+    print(f"--- AI Code Capture Server ---")
+    print(f"Config File: '{CONFIG_FILE}' (exists: {CONFIG_FILE.is_file()})")
+    print(f"Starting Flask server on http://{host_ip}:{port_num}")
+    print(f"Server CWD (Potential Git Root): {SERVER_DIR}")
+    print(f"Saving non-Git files to: {SAVE_FOLDER_PATH.relative_to(SERVER_DIR)}")
+    print(f"Saving logs to: {LOG_FOLDER_PATH.relative_to(SERVER_DIR)}")
+    if IS_REPO: print("Git integration: ENABLED")
+    else: print("Git integration: DISABLED")
+
+    print(f"Python auto-run: {'ENABLED' if AUTO_RUN_PYTHON_ON_SYNTAX_OK else 'DISABLED'}")
+    print(f"Shell auto-run:  {'ENABLED' if AUTO_RUN_SHELL_ON_SYNTAX_OK else 'DISABLED'}{' !!! CAUTION !!!' if AUTO_RUN_SHELL_ON_SYNTAX_OK else ''}")
+
+    print("--- Server ready ---", file=sys.stderr)
+
+    try:
+        # Use Flask's dev server for simplicity
+        app.run(host=host_ip, port=port_num, debug=False)
+    except OSError as e:
+        if "Address already in use" in str(e) or "WinError" in str(e):
+            print(f"\nE: Address already in use (Port {port_num}).", file=sys.stderr)
+            print(f"   Stop other program or use 'python3 {THIS_SCRIPT_NAME} -p <new_port>'", file=sys.stderr); sys.exit(1)
+        else: print(f"\nE: Failed to start server: {e}", file=sys.stderr); sys.exit(1)
+    except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)
