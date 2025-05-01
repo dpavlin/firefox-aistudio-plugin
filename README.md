@@ -1,40 +1,58 @@
-# Motivation
+# AI Code Capture
 
-Google Gemini 2.5 is currently best model to talk about your code,
-available freely using Google AI Studio web interface.
+Firefox plugin for Google AI Studio integration with local file system 
 
-But manually copy/pasting changes gets old quick so I vibe coded
-this plugin to replace that process with automation.
+## Motivation
 
-# install local dependencies
+Google Gemini 2.5 Pro is currently best model for discussing your code, freely available via the Google AI Studio web interface.
 
-apt install python3-flask python3-flask-cors
+However, manually copy-pasting changes gets old quickly. This project automates that process.
 
-# start local server
+## Install Local Dependencies
 
-python3 server.py
+```bash
+sudo apt install python3-flask python3-flask-cors
+```
 
-# load temporary add-on in firefox
+## Start Local Server
 
-# pack and send source code to model
+```bash
+# Navigate to your project's root directory first
+python3 server.py [--port <port_number>]
+```
+*Default port is 5000.*
 
-zip /tmp/firefox-aistudio-plugin.zip $( git ls-files )
+## Load Temporary Add-on in Firefox
 
-# Google AI Studio prompt
+1.  Go to `about:debugging` in Firefox.
+2.  Click "This Firefox".
+3.  Click "Load Temporary Add-on...".
+4.  Select the `manifest.json` file inside the `extension` directory.
 
-ALWAYS include full file content when changing files and filename.
-ALWAYS add comment in first line which include filename with marker
-@@FILENAME@@ filename.py
+## Pack and Send Source Code to Model
 
-# git integration
+To provide context to the AI:
 
-If there is local git repository with files in it, server will
-automatically update and commit changes.
+```bash
+# Run from your project's root directory
+zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
+```
 
-It will not add new files, you have to do that manually.
+*Upload `/tmp/firefox-aistudio-plugin.zip` to AI Studio.*
 
-# multiple projects in separate tabs
+## Google AI Studio Prompt Instructions
 
-Plugin pop-up has option to specify server port (and server has --port
-option) which allows you to have multiple sessions with AI Studio using
-different ports.
+**Crucial:** Instruct the AI how to format its output. Include this in your prompt:
+
+> ALWAYS include the full file content when changing files.
+> ALWAYS add a comment in the **very first line** specifying the filename with the marker `@@FILENAME@@ path/to/your/file.ext`
+
+## Git Integration
+
+*   If the server runs within a local Git repository, it will automatically `git add` and `git commit` changes for **tracked** files specified via the `@@FILENAME@@` marker.
+*   It **will not** add *new* files to Git automatically; you must `git add` them manually first.
+
+## Multiple Projects in Separate Tabs
+
+*   Use the server's `--port <number>` option to run multiple instances on different ports for different projects.
+*   Configure the matching port number in the extension popup for each corresponding AI Studio tab.
