@@ -6,7 +6,7 @@ status_bp = Blueprint('status_bp', __name__)
 @status_bp.route('/status', methods=['GET'])
 def get_status():
     """Returns current server status and RUNNING configuration."""
-    config = current_app.config['APP_CONFIG'] # Access config passed during registration
+    config = current_app.config['APP_CONFIG']
     status_data = {
         'status': 'running',
         'working_directory': str(config['SERVER_DIR']),
@@ -14,10 +14,9 @@ def get_status():
         'log_directory': str(config['LOG_FOLDER_PATH'].relative_to(config['SERVER_DIR'])),
         'is_git_repo': config['IS_REPO'],
         'port': config['SERVER_PORT'],
-        'auto_run_python': config['AUTO_RUN_PYTHON_ON_SYNTAX_OK'],
-        'auto_run_shell': config['AUTO_RUN_SHELL_ON_SYNTAX_OK'],
+        'auto_run_python': config['auto_run_python'], # Use lowercase key
+        'auto_run_shell': config['auto_run_shell'],    # Use lowercase key
         'config_file_exists': config['CONFIG_FILE'].is_file(),
-        # Re-load config file content for potentially updated info
         'config_file_content': current_app.config['load_config_func']()
     }
     return jsonify(status_data)
@@ -26,5 +25,5 @@ def get_status():
 def test_connection():
     """Simple endpoint to test if the server is running, returns status."""
     print("Received /test_connection request", file=sys.stderr)
-    return get_status() # Reuse the status endpoint logic
+    return get_status()
 # @@FILENAME@@ routes/status.py

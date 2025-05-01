@@ -20,7 +20,6 @@ config = config_manager.initialize_config()
 app = Flask(__name__)
 
 # Configure CORS - Allow all origins for simplicity in development
-# Adjust in production if needed
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Create a shared lock (can be accessed via app config)
@@ -44,13 +43,14 @@ app.register_blueprint(logs_bp)
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    host_ip = '127.0.0.1' # Listen only on localhost by default
+    host_ip = '127.0.0.1'
     port_num = config['SERVER_PORT']
 
     print(f"--- AI Code Capture Server (Refactored) ---")
     print(f"Config File Path: '{config['CONFIG_FILE']}' ({'Exists' if config['CONFIG_FILE'].is_file() else 'Not Found'})")
     print(f"  Config File Content: {config['loaded_file_config']}")
     print("-" * 30)
+    # This block prints the effective RUNTIME settings using the lowercase keys
     print(f"Effective RUNNING Settings:")
     print(f"  Host: {host_ip}")
     print(f"  Port: {port_num}")
@@ -58,16 +58,16 @@ if __name__ == '__main__':
     print(f"  Save Dir:   ./{config['SAVE_FOLDER_PATH'].relative_to(config['SERVER_DIR'])}")
     print(f"  Log Dir:    ./{config['LOG_FOLDER_PATH'].relative_to(config['SERVER_DIR'])}")
     print(f"  Git Repo:   {'YES' if config['IS_REPO'] else 'NO'}")
-    print(f"  Py Auto-Run:  {'ENABLED' if config['AUTO_RUN_PYTHON_ON_SYNTAX_OK'] else 'DISABLED'}")
-    print(f"  Sh Auto-Run:  {'ENABLED' if config['AUTO_RUN_SHELL_ON_SYNTAX_OK'] else 'DISABLED'}{' <-- DANGEROUS!' if config['AUTO_RUN_SHELL_ON_SYNTAX_OK'] else ''}")
+    print(f"  Py Auto-Run:  {'ENABLED' if config['auto_run_python'] else 'DISABLED'}") # Lowercase
+    print(f"  Sh Auto-Run:  {'ENABLED' if config['auto_run_shell'] else 'DISABLED'}{' <-- DANGEROUS!' if config['auto_run_shell'] else ''}") # Lowercase
     print("-" * 30)
     print(f"Starting Flask server on http://{host_ip}:{port_num}")
     print("Use Ctrl+C to stop the server.")
-    print(f"NOTE: Config changes made via the popup require a server restart.", file=sys.stderr)
+    print(f"NOTE: Auto-run settings changed via popup apply immediately.", file=sys.stderr) # Updated Note
+    print(f"      Port changes require a server restart.", file=sys.stderr)
     print("--- Server ready ---", file=sys.stderr)
 
     try:
-        # Use Flask's development server. For production, use a WSGI server.
         app.run(host=host_ip, port=port_num, debug=False)
     except OSError as e:
         if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'):

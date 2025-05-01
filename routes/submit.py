@@ -14,7 +14,6 @@ submit_bp = Blueprint('submit_bp', __name__)
 @submit_bp.route('/submit_code', methods=['POST'])
 def submit_code_route():
     """Handles code submission, saving, Git, checks, and execution."""
-    # Access shared resources passed via app config
     config = current_app.config['APP_CONFIG']
     request_lock = current_app.config['REQUEST_LOCK']
 
@@ -36,7 +35,7 @@ def submit_code_route():
         sanitized_path_from_marker = None; save_target = "fallback"
         absolute_path_target = None; detected_language_name = "Unknown"
 
-        # --- 1. Check for @@FILENAME@@ Marker ---
+        # --- Marker Parsing and Git/Fallback Logic (Unchanged from previous refactor) ---
         match = FILENAME_EXTRACT_REGEX.search(received_code)
         if match:
             extracted_filename_raw = match.group(1).strip()
@@ -47,53 +46,34 @@ def submit_code_route():
             sanitized_path_from_marker = sanitize_filename(extracted_filename_raw)
 
             if sanitized_path_from_marker:
-                print(f"Info: Sanitized path from marker: '{sanitized_path_from_marker}'", file=sys.stderr)
-                # --- 2. Attempt Git Integration ---
                 if config['IS_REPO']:
                     git_path_to_check = sanitized_path_from_marker
                     if '/' not in sanitized_path_from_marker.replace('\\', '/'):
                         found_rel_path = find_tracked_file_by_name(sanitized_path_from_marker, config['SERVER_DIR'], config['IS_REPO'])
                         if found_rel_path: git_path_to_check = found_rel_path
                     absolute_path_target = (config['SERVER_DIR'] / git_path_to_check).resolve()
-
-                    if not str(absolute_path_target).startswith(str(config['SERVER_DIR'])):
-                        print(f"W: Potential directory traversal! Path '{absolute_path_target}' outside root. Blocking.", file=sys.stderr)
-                        absolute_path_target = None
+                    if not str(absolute_path_target).startswith(str(config['SERVER_DIR'])): absolute_path_target = None
                     else:
                         is_tracked = is_git_tracked(git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                         if is_tracked:
-                            print(f"Info: Target path '{git_path_to_check}' is tracked. Attempting Git update.", file=sys.stderr)
                             code_to_save = received_code[marker_line_length:]
                             commit_success = update_and_commit_file(absolute_path_target, code_to_save, git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                             if commit_success:
                                 save_filepath_str = str(absolute_path_target); final_save_filename = git_path_to_check
                                 was_git_updated = True; save_target = "git"
                                 detected_language_name = f"From Git ({Path(git_path_to_check).suffix})"
-                            else:
-                                print(f"W: Git update failed for '{git_path_to_check}'. Reverting to fallback.", file=sys.stderr)
-                                code_to_save = received_code; absolute_path_target = None; save_target = "fallback"
+                            else: code_to_save = received_code; absolute_path_target = None; save_target = "fallback"
                         else:
-                            print(f"Info: Path '{git_path_to_check}' not tracked. Saving fallback.", file=sys.stderr)
                             absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
-                            if not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
-                                 print(f"W: Fallback path '{absolute_path_target}' escaped save folder! Using timestamped.", file=sys.stderr)
-                                 absolute_path_target = None
+                            if not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])): absolute_path_target = None
                             code_to_save = received_code; save_target = "fallback"
-                else: # Not a Git repository
-                     print(f"Info: Not Git repo. Saving fallback using marker path '{sanitized_path_from_marker}'.", file=sys.stderr)
+                else:
                      absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
-                     if not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
-                          print(f"W: Fallback path '{absolute_path_target}' escaped save folder! Using timestamped.", file=sys.stderr)
-                          absolute_path_target = None
+                     if not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])): absolute_path_target = None
                      code_to_save = received_code; save_target = "fallback"
-            else: # Sanitization failed
-                print(f"W: Invalid marker filename '{extracted_filename_raw}'. Using timestamped fallback.", file=sys.stderr)
-                absolute_path_target = None; save_target = "fallback"; code_to_save = received_code
-        else: # No marker found
-            print("Info: No @@FILENAME@@ marker. Using timestamped fallback.", file=sys.stderr)
-            absolute_path_target = None; save_target = "fallback"; code_to_save = received_code
+            else: absolute_path_target = None; save_target = "fallback"; code_to_save = received_code
+        else: absolute_path_target = None; save_target = "fallback"; code_to_save = received_code
 
-        # --- 3. Fallback Saving Logic ---
         if save_target == "fallback":
             if absolute_path_target:
                  save_filepath_str = str(absolute_path_target)
@@ -101,24 +81,19 @@ def submit_code_route():
                  except ValueError: final_save_filename = Path(save_filepath_str).name
                  ext = Path(save_filepath_str).suffix.lower()
                  detected_language_name = f"From Path ({ext})" if ext else "From Path (no ext)"
-                 print(f"Info: Saving fallback using marker-derived path: '{final_save_filename}' in '{config['SAVE_FOLDER_PATH'].name}'", file=sys.stderr)
             else:
                  ext_for_fallback, detected_language_name = detect_language_and_extension(code_to_save)
                  base_name = "code"
                  if detected_language_name not in ["Unknown", "Text"]: base_name = detected_language_name.lower().replace(" ", "_").replace("/", "_")
-                 # Pass save_folder_path to generate function
                  save_filepath_str = generate_timestamped_filepath(config['SAVE_FOLDER_PATH'], extension=ext_for_fallback, base_prefix=base_name)
                  final_save_filename = Path(save_filepath_str).name
-                 print(f"Info: Saving fallback using generated filename: '{final_save_filename}'", file=sys.stderr)
 
-            print(f"Info: Writing code to fallback file: '{save_filepath_str}'", file=sys.stderr)
             if not save_code_to_file(code_to_save, Path(save_filepath_str)):
                 return jsonify({'status': 'error', 'message': 'Failed to save fallback file.'}), 500
 
-        # --- 4. Syntax Check & Optional Execution ---
+        # --- Syntax Check & Optional Execution (Using lowercase config keys) ---
         syntax_ok = None; run_success = None; log_filename = None; script_type = None
-        if not save_filepath_str or not Path(save_filepath_str).is_file():
-             return jsonify({'status': 'error', 'message': 'Internal error: Saved file path invalid.'}), 500
+        if not save_filepath_str or not Path(save_filepath_str).is_file(): return jsonify({'status': 'error', 'message': 'Internal error: Saved file path invalid.'}), 500
 
         check_run_filepath = save_filepath_str
         display_filename = final_save_filename or Path(check_run_filepath).name
@@ -127,37 +102,30 @@ def submit_code_route():
         if file_extension == '.py':
             script_type = 'python'
             is_server_script = Path(check_run_filepath).resolve() == (config['SERVER_DIR'] / config['THIS_SCRIPT_NAME']).resolve()
-            if is_server_script: print(f"Info: Skipping check/run for server script itself.", file=sys.stderr)
-            else:
-                print(f"Info: Performing Python syntax check for '{display_filename}'...", file=sys.stderr)
+            if not is_server_script:
                 try:
                     saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
                     compile(saved_code_content, check_run_filepath, 'exec')
-                    syntax_ok = True; print(f"Info: Python syntax OK.", file=sys.stderr)
-                    if config['AUTO_RUN_PYTHON_ON_SYNTAX_OK']:
-                        print(f"Info: Attempting Python run (auto-run enabled).", file=sys.stderr)
+                    syntax_ok = True
+                    # *** Use lowercase config key ***
+                    if config['auto_run_python']:
                         run_success, logpath = run_script(check_run_filepath, 'python', config['LOG_FOLDER_PATH'])
                         if logpath: log_filename = Path(logpath).name
-                    else: print(f"Info: Python auto-run disabled.", file=sys.stderr)
-                except SyntaxError as e:
-                    syntax_ok = False; run_success = False; print(f"E: Python Syntax Error", file=sys.stderr) # Simplified log
-                except Exception as compile_e:
-                    syntax_ok = False; run_success = False; print(f"E: Python compile/setup error: {compile_e}", file=sys.stderr)
+                except SyntaxError: syntax_ok = False; run_success = False
+                except Exception: syntax_ok = False; run_success = False
 
         elif file_extension == '.sh':
              script_type = 'shell'
-             print(f"Info: Performing Shell syntax check for '{display_filename}'...", file=sys.stderr)
              syntax_ok, syntax_log_path = check_shell_syntax(check_run_filepath, config['LOG_FOLDER_PATH'])
              if syntax_log_path: log_filename = Path(syntax_log_path).name
              if syntax_ok:
-                  if config['AUTO_RUN_SHELL_ON_SYNTAX_OK']:
-                       print(f"Info: Attempting Shell run (auto-run enabled).", file=sys.stderr)
+                  # *** Use lowercase config key ***
+                  if config['auto_run_shell']:
                        run_success, run_log_path = run_script(check_run_filepath, 'shell', config['LOG_FOLDER_PATH'])
                        if run_log_path: log_filename = Path(run_log_path).name
-                  else: print(f"Info: Shell auto-run disabled.", file=sys.stderr)
              else: run_success = False
 
-        # --- 5. Send Response ---
+        # --- Send Response ---
         response_data = {
             'status': 'success', 'saved_as': final_save_filename,
             'saved_path': str(Path(save_filepath_str).relative_to(config['SERVER_DIR'])) if save_filepath_str else None,
