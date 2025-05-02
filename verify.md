@@ -1,91 +1,71 @@
-this list is created with following prompt:
+**Consolidated Verification List**
 
-describe problems fixed in this chat session in form of verify that....
+**I. Core Code Capture & Highlighting (Content Script)**
 
-Okay, here is a summary of the problems fixed during this chat session, phrased as verification steps:
+1.  **Verify that** the `content.js` script uses the correct CSS selector (`ms-code-block pre code`) to identify potential code elements within the AI Studio page structure.
+2.  **Verify that** `content.js` checks the `textContent` of identified code elements for the `@@FILENAME@@` marker strictly at the beginning of the first line (allowing for leading whitespace).
+3.  **Verify that** when a code element with the marker is detected, `content.js` correctly finds the parent `<ms-code-block>` element to use as the target for highlighting and state tracking.
+4.  **Verify that** a subtle "pending" highlight (`.aicapture-pending`) is applied to the `<ms-code-block>` element when its stabilization timer starts or restarts.
+5.  **Verify that** the plugin waits for a period of inactivity (`STABILIZATION_DELAY_MS`, e.g., 2 seconds) after a marked code block appears or changes before processing it further.
+6.  **Verify that** if changes occur to the text content within a monitored code block while its stabilization timer is running, the timer is correctly reset.
+7.  **Verify that** if the `@@FILENAME@@` marker is removed from a block while its timer is pending, the pending highlight is removed, and the block is not sent to the server.
+8.  **Verify that** once the stabilization timer completes successfully, the pending highlight is removed, and a temporary processing highlight (`.aicapture-highlight`) is applied while the request is sent to the background script.
+9.  **Verify that** each specific `<ms-code-block>` element is processed and sent to the server **only once** per page load (achieved by adding it to `processedBlocks` in `content.js` and not removing it).
+10. **Verify that** after server processing, the highlight on the `<ms-code-block>` changes to green (`.aicapture-success`) or red (`.aicapture-error`) based on the server's response.
+11. **Verify that** the final success or error highlight applied to a code block **remains visible indefinitely** (no fade-out or automatic removal).
+12. **Verify that** the `MutationObserver` in `content.js` listens for `characterData` changes to correctly detect modifications within code blocks during generation.
+13. **Verify that** the `MutationObserver` processing is debounced (`debouncedScan`) to handle rapid DOM changes efficiently.
 
-**Initial Setup & Server:**
+**II. Background Script & Communication**
 
-1.  **Verify that** the `server.py` script starts without `SyntaxError` related to missing colons (`:`) after `try` statements within `except` blocks (specifically fixed in `check_shell_syntax`).
-2.  **Verify that** the `server.py` script starts without `NameError: name 'sys' is not defined` (specifically fixed in `routes/status.py` by adding `import sys`).
-3.  **Verify that** the server correctly loads configuration from `server_config.json` if it exists, and uses defaults otherwise.
-4.  **Verify that** command-line arguments (`--port`, `--shell`, `--enable-python-run`) correctly override settings from the config file for the *running* server instance.
-5.  **Verify that** the server's startup messages clearly display the *Effective RUNNING Settings* being used.
+14. **Verify that** the `background.js` script correctly receives `submitCode` messages from `content.js`.
+15. **Verify that** `background.js` retrieves the correct server port associated with the *sending tab's ID* from storage before sending a `submitCode` request.
+16. **Verify that** `background.js` correctly sends the code to the backend server (`/submit_code`) with the `Content-Type: application/json` header and a properly stringified JSON body (`{ "code": "..." }`).
+17. **Verify that** `background.js` handles potential network errors or non-JSON responses from the server gracefully and relays an appropriate error status back to `content.js`.
+18. **Verify that** `background.js` correctly relays the success/failure status received from the server back to the calling `content.js`.
+19. **Verify that** `background.js` checks the global activation state before processing a `submitCode` message and sends an "inactive" status back if the extension is disabled.
+20. **Verify that** `background.js` handles `getPort`, `storePort`, `getActivationState`, and `storeActivationState` messages correctly, interacting with `browser.storage.local` and using the appropriate tab ID for port operations.
+21. **Verify that** the `testConnection` message handler in `background.js` uses the specific `port` number provided in the message payload for the fetch request.
+22. **Verify that** the `updateConfig` message handler in `background.js` uses the port associated with the *sender tab* to target the correct server instance.
+23. **Verify that** `background.js` includes a listener (`tabs.onRemoved`) that cleans up the stored port setting for a tab when it is closed.
 
-**Popup UI & Settings:**
+**III. Backend Server Processing (Python)**
 
-6.  **Verify that** the popup correctly displays the initial server port number (specific to the current tab or the default) and the global activation state upon opening.
-7.  **Verify that** the popup displays the server's Current Working Directory (CWD), relative Save Directory, relative Log Directory, and Git Repository status (Enabled/Disabled) after a successful connection test or initial load.
-8.  **Verify that** the popup layout is more compact, labels/text are concise, and the 'Test' button is located on the same line as the Port input field.
-9.  **Verify that** the popup displays controls (toggles) for 'Auto-Run Python' and 'Auto-Run Shell'.
-10. **Verify that** the initial state of the auto-run toggles in the popup reflects the *currently running* state reported by the server.
+24. **Verify that** the backend server (`routes/submit.py`) correctly handles potential leading UTF-8 BOM characters in the received code.
+25. **Verify that** the backend server uses the correct regex (`^\s*@@FILENAME@@\s+(.+?)\s*$`) to detect the marker *only* at the beginning of the (potentially BOM-stripped) first line.
+26. **Verify that** when a valid first-line marker is found, the backend server strips exactly that first line before saving or committing the `code_to_save`.
+27. **Verify that** the backend correctly sanitizes the filename extracted from the marker, rejecting invalid paths (e.g., absolute, containing `..`, hidden segments) and appending `.txt` if no valid extension exists.
+28. **Verify that** if filename sanitization fails, the backend reverts to fallback logic using the original (BOM-stripped) code content and does not use the invalid marker path.
+29. **Verify that** if no valid marker is found on the first line, the backend uses the original (BOM-stripped) code content for fallback processing.
+30. **Verify that** the server correctly determines the save target ("git", "fallback_named", "fallback") based on the marker validity, sanitization result, repo status, and file tracking status (`file_handler.py`).
+31. **Verify that** for tracked files in a Git repo, the backend only commits if the new (stripped) content is different from the existing file content (`file_handler.py`).
+32. **Verify that** the server correctly generates timestamped filenames in the `received_codes/` directory during fallback scenarios (`utils.py`).
+33. **Verify that** the server uses a `threading.Lock` to process `/submit_code` requests sequentially, preventing race conditions.
+34. **Verify that** Flask Blueprints are correctly imported and registered in `server.py`.
 
-**Configuration Management:**
+**IV. Backend Server Execution (Optional)**
 
-11. **Verify that** changing the port number in the popup only affects the *current browser tab's* communication with the server and does not change the stored default port or other tabs' ports.
-12. **Verify that** changing the 'Auto-Run Py' or 'Auto-Run Sh' toggles in the popup saves the configuration to `server_config.json`.
-13. **Verify that** changing the 'Auto-Run Py' or 'Auto-Run Sh' toggles in the popup applies the setting to the *currently running* server process immediately (without requiring a server restart).
-14. **Verify that** changing the auto-run toggles in the popup successfully communicates with the background script and triggers a request to the server's `/update_config` endpoint without causing a `current_app is not defined` error in the background script console.
-15. **Verify that** the popup status message correctly indicates when a server restart is needed (only for port changes) versus when a setting (auto-run flags) is applied immediately.
+35. **Verify that** Python syntax checking (`compile()`) is performed on saved `.py` files (unless it's the server script itself).
+36. **Verify that** Shell syntax checking (`bash -n`) is performed on saved `.sh` files (`script_runner.py`).
+37. **Verify that** script execution (`run_script`) only occurs if the corresponding `auto_run_python` or `auto_run_shell` flag is enabled *in the server's current runtime configuration*.
+38. **Verify that** script execution captures stdout/stderr to the correct log files in the `logs/` directory and handles timeouts.
 
-**Core Functionality (Code Capture & Processing):**
+**V. Popup UI & Configuration**
 
-16. **Verify that** code blocks marked with `@@FILENAME@@` at the beginning in AI Studio are detected by the content script.
-17. **Verify that** detected code blocks receive the initial yellow highlight (`.aicapture-highlight`).
-18. **Verify that** requests are sent from the extension to the server's `/submit_code` endpoint for detected code blocks.
-19. **Verify that** the server queues concurrent `/submit_code` requests and processes them sequentially using the blocking lock, instead of returning a 429 'Server busy' error.
-20. **Verify that** the server correctly determines the save target (Git vs. fallback) based on the `@@FILENAME@@` marker, repository status, and file tracking status.
-21. **Verify that** HTML content generated by the AI is correctly saved to disk (either in Git or the fallback directory).
-22. **Verify that** the server correctly skips syntax checks and execution attempts for non-Python/non-Shell files (like HTML).
-23. **Verify that** after server processing, the highlight on the code block in AI Studio changes to green (`.aicapture-success`) or red (`.aicapture-error`) based on the server's response.
-24. **Verify that** the final success/error highlight is eventually removed after a delay.
+39. **Verify that** when the popup is opened, it fetches and displays the server port number specifically associated with the *current active tab* from storage, defaulting to the correct default port (e.g., 5000) if none is stored for that tab.
+40. **Verify that** the popup fetches and displays the current *global* activation state correctly.
+41. **Verify that** changing the port number in the popup input field triggers a message to `background.js` to store the new port *for the current tab*.
+42. **Verify that** clicking "Test Connection" sends the request to the port number *currently visible* in the popup's input field.
+43. **Verify that** after a successful "Test Connection", the popup displays the server's CWD, Save Dir, Log Dir, Git status, and the *server's reported running configuration* for auto-run Python/Shell toggles.
+44. **Verify that** toggling the activation switch updates the *global* activation state via `background.js`.
+45. **Verify that** toggling the "Auto-Run Py/Sh" switches sends an `updateConfig` message, targeting the server associated with the *current tab's* port, and updates the server's *runtime* state immediately.
+46. **Verify that** the popup status message correctly reflects connection status, success/failure of operations, and configuration update results (including whether a server restart is needed for port changes vs. immediate effect for auto-run).
 
-Okay, here's a summary of the problems addressed during this chat session, framed as verification points:
+**VI. Server Setup & Configuration**
 
-Verify that the popup window correctly loads and displays the Server Port number from storage or defaults when opened. (Fixed by implementing popup.js and correct message handling in background.js).
+47. **Verify that** the `server.py` script starts without basic Python syntax errors (like missing colons).
+48. **Verify that** the server correctly loads initial settings from `server_config.json` if present, using defaults otherwise (`config_manager.py`).
+49. **Verify that** command-line arguments (`--port`, `--shell`, `--enable-python-run`) correctly override settings from the config file or defaults for the *running server instance*.
+50. **Verify that** the `/update_config` endpoint saves changes (port, auto-run flags) back to `server_config.json` (`config_manager.py`).
+51. **Verify that** the `/update_config` endpoint updates the *live runtime configuration* for `auto_run_python` and `auto_run_shell` in the `APP_CONFIG` dictionary used by the running server instance.
 
-Verify that the "Test Connection" button in the popup successfully contacts the server's /test_connection endpoint and displays status information (including the server's actual running port, CWD, and auto-run states) in the popup's status area. (Fixed by adding logic in popup.js and background.js).
-
-Verify that the Server CWD, Save Dir, Log Dir, and Git Repo status are displayed as read-only information in the popup after a successful connection test or initial load. (Fixed by adding elements to popup.html and logic to popup.js to display data fetched from /status).
-
-Verify that the Auto-Run Python and Auto-Run Shell toggles in the popup accurately reflect the currently running state of the server upon initial load (if connected) and after a successful "Test Connection". (Fixed by fetching state from /status in popup.js via background.js).
-
-Verify that changing the Auto-Run Python and Auto-Run Shell toggles in the popup updates the server_config.json file and modifies the currently running server's behavior for subsequent requests without requiring a server restart. (Fixed by updating app.config in routes/config_routes.py and adjusting popup status message).
-
-Verify that the popup status message correctly indicates when a server restart is required (for Port changes) and when it is not required (for Auto-Run flag changes). (Fixed in routes/config_routes.py response and popup.js status update logic).
-
-Verify that the server.py script starts without SyntaxError exceptions related to missing colons in try...except blocks. (Fixed by adding missing colons in helper functions).
-
-Verify that the server.py script starts without NameError: name 'Blueprint' is not defined after refactoring. (Fixed by adding from flask import Blueprint to route files).
-
-Verify that the content.js script uses updated and currently correct CSS selectors to identify code blocks within model responses in AI Studio. (Fixed by analyzing HTML and updating selectors).
-
-Verify that the content.js script correctly debounces its processing of DOM changes to avoid overwhelming the browser or server, mitigating "Resource has been exhausted" errors. (Fixed by re-introducing/adjusting debouncing logic).
-
-Verify that the content.js script only attempts to process and send code blocks that start with the @@FILENAME@@ marker. (Fixed by adding marker check in processCodeBlock).
-
-Verify that the server no longer returns 429 TOO MANY REQUESTS for the /submit_code endpoint, but instead processes requests sequentially by waiting for the processing lock (or using the background batching mechanism implemented last). (Fixed by changing lock acquisition to blocking or implementing the batch processor).
-
-Verify that the visual highlighting feedback (initial yellow, then success green or error red) works correctly on code blocks in AI Studio after they are processed by the extension and server (unless modified by the batching refactor, which changes the feedback loop). (This depends on the selectors, message passing, and highlight logic all working correctly after the fixes).
-
-Okay, here is a summary of the problems addressed and fixed during this chat session, presented in the requested "Verify that..." format:
-
-Verify that the popup window now correctly displays the server port number saved in the extension's settings when it opens (fixing the issue where the port field was initially empty).
-
-Verify that the popup window now includes toggles for "Auto-Run Python" and "Auto-Run Shell" under a "Server Auto-Run Settings" section.
-
-Verify that changing the server auto-run toggles in the popup sends a request to the server's /update_config endpoint, saves the settings to the server_config.json file, and displays a message indicating a server restart is needed for the changes to take effect.
-
-Verify that server.py now starts correctly without the SyntaxError caused by missing colons (:) after try statements within except blocks (specifically within the check_shell_syntax function).
-
-Verify that the extension's content script (content.js) now correctly identifies code blocks in the AI Studio page that start with the @@FILENAME@@ marker, using updated CSS selectors.
-
-Verify that code blocks identified by the content script now receive the initial yellow highlight (.aicapture-highlight).
-
-Verify that after a code block is sent and processed by the server (via /submit_code), the highlight on the code block in AI Studio changes to green (.aicapture-success) or red (.aicapture-error) based on the server's response status.
-
-Verify that the "Auto-Run Python" and "Auto-Run Shell" toggles in the popup now reflect the last known running state of the server, as reported back in responses from the /submit_code or /test_connection endpoints.
-
-Verify that the "Resource has been exhausted" error previously seen in the web page console is less likely to occur, due to the re-introduction of debouncing in the content.js script's MutationObserver.
-
-Testing these points should confirm that the fixes implemented during this session are working correctly.
