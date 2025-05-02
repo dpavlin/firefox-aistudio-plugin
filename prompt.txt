@@ -1,5 +1,4 @@
 ALWAYS include the full file content when changing files.
-ALWAYS add a comment in the **very first line** specifying the filename with the marker `@@FILENAME@@ path/to/your/file.ext`
-
+ALWAYS add a comment in the **very first line** specifying the filename with the marker `// @@FILENAME@@ path/to/your/file.js`
 ALWAYS if showing fill file content include filename at bottom after file has ended.
 
