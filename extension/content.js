@@ -1,4 +1,4 @@
-//@@FILENAME@@ extension/content.js
+// @@FILENAME@@ extension/content.js
 // Debounce function (assuming it exists)
 function debounce(func, wait) {
     let timeout;
@@ -20,22 +20,22 @@ const FILENAME_MARKER = '@@FILENAME@@';
 const CODE_BLOCK_SELECTOR = 'ms-code-block pre code';
 // This is no longer the primary way to find the target, but could be a fallback
 // const PARENT_SELECTOR_FOR_HIGHLIGHT = 'div.markdown, user-query, model-response, code-block, ms-code-block'; // Added ms-code-block just in case
-const HIGHLIGHT_DELAY_MS = 2000; // How long the success/error highlight stays visible before fading
-const FADE_OUT_DURATION_MS = 500; // Must match transition duration in .aicapture-fadeout CSS
+// const HIGHLIGHT_DELAY_MS = 2000; // No longer needed for removal delay
+// const FADE_OUT_DURATION_MS = 500; // No longer needed
 
 // --- State ---
 let processingBlocks = new Set(); // Use the highlight target element as the key
 
 // --- Core Logic ---
 
-// Helper function to remove all highlight classes cleanly
+// Helper function to remove all highlight classes cleanly (Might not be needed anymore, but keep for potential future use)
 function removeAllHighlights(element) {
     if (element) {
         element.classList.remove(
             'aicapture-highlight',
             'aicapture-success',
             'aicapture-error',
-            'aicapture-fadeout'
+            'aicapture-fadeout' // Keep fadeout here in case it's added manually for some reason
         );
     }
 }
@@ -55,19 +55,18 @@ function processCodeBlock(codeElement) { // Renamed parameter for clarity
         let highlightTarget = codeElement.closest('ms-code-block');
         if (!highlightTarget) {
             console.warn("AI Code Capture: Could not find 'ms-code-block' parent for code element:", codeElement, ". Skipping highlight/send.");
-            // Optionally, try highlighting the <pre> or <code> as fallback, but it might look weird.
-            // highlightTarget = codeElement.closest('pre') || codeElement;
-            // if (!highlightTarget) return; // Give up if no reasonable target
             return; // Skip if we can't find the intended target
         }
 
         // Use the highlightTarget for the processing check
+        // *** This check ensures it only processes ONCE per element ***
         if (processingBlocks.has(highlightTarget)) {
-            // console.log("Skipping block, already processing highlight target:", highlightTarget);
+            // console.log("Skipping block, already processed highlight target:", highlightTarget);
             return;
         }
 
         // Mark as processing to avoid loops
+        // *** Element is ADDED but NEVER DELETED, ensuring single processing ***
         processingBlocks.add(highlightTarget);
 
         // Add initial highlight
@@ -87,50 +86,25 @@ function processCodeBlock(codeElement) { // Renamed parameter for clarity
             const success = response && response.status === 'success';
             const finalClass = success ? 'aicapture-success' : 'aicapture-error';
 
+            // Apply final, persistent highlight class
             highlightTarget.classList.add(finalClass);
             if (success) {
-                console.log("AI Code Capture: Highlight success");
+                console.log("AI Code Capture: Highlight success (persistent)");
             } else {
-                console.error("AI Code Capture: Highlight error. Response:", response);
+                console.error("AI Code Capture: Highlight error (persistent). Response:", response);
             }
 
-            // Set timeout to initiate fade-out, then final removal
-            setTimeout(() => {
-                // Add fadeout class to start transition
-                highlightTarget.classList.add('aicapture-fadeout');
-                // Remove the specific success/error class *after* adding fadeout
-                // Note: .aicapture-fadeout's transition handles the visual disappearance
-                highlightTarget.classList.remove(finalClass);
-
-                // Set another timeout to remove all classes *after* the fade transition completes
-                setTimeout(() => {
-                    removeAllHighlights(highlightTarget);
-                    // Mark as no longer processing AFTER the highlight is fully gone
-                    processingBlocks.delete(highlightTarget);
-                    console.log("AI Code Capture: Removed highlight after fade");
-                }, FADE_OUT_DURATION_MS); // Wait for fade duration
-
-            }, HIGHLIGHT_DELAY_MS); // Wait before starting fade
+            // *** REMOVED setTimeout logic for fading and removal ***
+            // The finalClass ('aicapture-success' or 'aicapture-error') will remain indefinitely.
 
         }).catch(error => {
             console.error('AI Code Capture: Error sending message or processing response:', error);
             // Still try to clean up the initial highlight and add error state
             highlightTarget.classList.remove('aicapture-highlight');
-            highlightTarget.classList.add('aicapture-error');
+            highlightTarget.classList.add('aicapture-error'); // Apply persistent error highlight on catch
 
-            // Set timeout to initiate fade-out for error state after catch
-            setTimeout(() => {
-                 highlightTarget.classList.add('aicapture-fadeout');
-                 highlightTarget.classList.remove('aicapture-error'); // Remove error class
-
-                 setTimeout(() => {
-                     removeAllHighlights(highlightTarget);
-                     // Mark as no longer processing AFTER the highlight is fully gone
-                     processingBlocks.delete(highlightTarget);
-                     console.log("AI Code Capture: Removed error highlight after catch & fade");
-                 }, FADE_OUT_DURATION_MS); // Wait for fade duration
-
-            }, HIGHLIGHT_DELAY_MS); // Wait before starting fade
+            // *** REMOVED setTimeout logic for fading and removal ***
+            // The 'aicapture-error' class will remain indefinitely.
         });
 
     } else {

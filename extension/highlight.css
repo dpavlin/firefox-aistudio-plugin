@@ -8,8 +8,7 @@
   border-radius: 4px;
   box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
 
-  /* Smooth transition for removal or change */
-  /* Keep transition for potential change FROM yellow TO green/red */
+  /* Smooth transition for change */
   transition: outline 0.5s ease-in-out, background-color 0.5s ease-in-out, box-shadow 0.5s ease-in-out;
 }
 
@@ -20,8 +19,8 @@
   background-color: rgba(40, 167, 69, 0.15) !important; /* Faint green background */
   box-shadow: 0 0 12px rgba(40, 167, 69, 0.6);
   border-radius: 4px;
-  /* Remove transition FROM success TO fadeout (as fadeout is removed) */
-  /* transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; */
+  /* Transition for smooth appearance when applied */
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
 /* Style for FAILED processing (server error, syntax error, failed commit, etc.) */
@@ -31,16 +30,8 @@
   background-color: rgba(220, 53, 69, 0.15) !important; /* Faint red background */
   box-shadow: 0 0 12px rgba(220, 53, 69, 0.6);
   border-radius: 4px;
-  /* Remove transition FROM error TO fadeout (as fadeout is removed) */
-  /* transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; */
+  /* Transition for smooth appearance when applied */
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* Style to REMOVE highlight smoothly (applied temporarily before removing class) */
-/* .aicapture-fadeout {
-    outline-color: transparent !important;
-    background-color: transparent !important;
-    box-shadow: none !important;
-} */
-/* Rule removed/commented out */
-
-/* @@FILENAME@@ extension/highlight.css */
+/* REMOVED .aicapture-fadeout class */
