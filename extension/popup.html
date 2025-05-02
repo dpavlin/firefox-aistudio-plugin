@@ -4,44 +4,39 @@
 <head>
     <title>AI Code Capture</title>
     <style>
-        /* Compact styling */
-        body { font-family: sans-serif; width: 300px; padding: 8px; background-color: #f0f0f0; color: #333; font-size: 13px; } /* Slightly smaller base font */
+        /* Compact styling - Styles remain the same */
+        body { font-family: sans-serif; width: 300px; padding: 8px; background-color: #f0f0f0; color: #333; font-size: 13px; }
         h1 { font-size: 15px; margin-top: 0; margin-bottom: 10px; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 4px; text-align: center; }
         h2 { font-size: 13px; margin-top: 10px; margin-bottom: 6px; color: #333; border-bottom: none; padding-bottom: 3px; font-weight: bold; }
-        /* Use grid for better alignment and control */
-        .settings-grid { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; /* Row gap, Column gap */ margin-bottom: 8px; }
+        .settings-grid { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; margin-bottom: 8px; }
         .settings-grid label { font-weight: bold; text-align: right; grid-column: 1 / 2; }
-        .settings-grid .control-area { grid-column: 2 / 3; display: flex; align-items: center; justify-content: flex-end; } /* Align controls to right */
+        .settings-grid .control-area { grid-column: 2 / 3; display: flex; align-items: center; justify-content: flex-end; }
         .settings-grid input[type="number"] { width: 55px; padding: 3px; border: 1px solid #ccc; border-radius: 3px; text-align: right; }
         .settings-grid input[type="number"].invalid { border-color: red; }
-        .settings-grid .info-text { /* Apply to span within grid */
-            font-size: 11px; color: #555; background-color: #eee; padding: 3px 5px; border-radius: 3px;
-            border: 1px solid #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-            font-family: monospace; width: 100%; /* Take available width */ box-sizing: border-box;
-        }
+        .settings-grid .info-text { font-size: 11px; color: #555; background-color: #eee; padding: 3px 5px; border-radius: 3px; border: 1px solid #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; width: 100%; box-sizing: border-box; }
         .settings-grid .info-text.status-true { color: #3c763d; border-color: #d6e9c6; }
         .settings-grid .info-text.status-false { color: #a94442; border-color: #ebccd1; }
         button#testConnectionBtn { padding: 4px 8px; font-size: 11px; cursor: pointer; background-color: #ddd; border: 1px solid #bbb; border-radius: 3px; margin-left: 5px; }
         button#testConnectionBtn:hover { background-color: #ccc; }
         button#testConnectionBtn:disabled { background-color: #eee; color: #aaa; cursor: default; }
-        .switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; } /* Smaller switch */
+        .switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 18px; }
-        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; } /* Smaller knob */
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: #4CAF50; }
-        input:checked + .slider:before { transform: translateX(16px); } /* Adjust slide distance */
+        input:checked + .slider:before { transform: translateX(16px); }
         input[disabled] + .slider { background-color: #e0e0e0; cursor: not-allowed; }
         input[disabled] + .slider:before { background-color: #f0f0f0; }
         #status-container { margin-top: 8px; border-top: 1px solid #ccc; padding-top: 8px; }
         #status-container h2 { font-size: 13px; margin-bottom: 4px; font-weight: bold; }
-        #last-response { font-size: 11px; background-color: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow-y: auto; color: #555; margin-bottom: 0; } /* Reduced max-height */
+        #last-response { font-size: 11px; background-color: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow-y: auto; color: #555; margin-bottom: 0; }
         #last-response.error { color: #a94442; background-color: #f2dede; border-color: #ebccd1; }
         #last-response.success { color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; }
         #last-response.info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; }
         #last-response.warning { color: #8a6d3b; background-color: #fcf8e3; border-color: #faebcc; }
         .config-section, .info-section { border: 1px solid #ddd; border-radius: 5px; padding: 5px 8px 8px 8px; margin-bottom: 8px; background-color: #fff; }
-        .config-section h2, .info-section h2 { text-align: left; font-size: 12px; color: #555; margin-bottom: 4px; padding-bottom: 2px; }
-        .config-section .settings-grid, .info-section .settings-grid { margin-bottom: 4px; } /* Reduce gap below last item in section */
+        .info-section h2 { text-align: left; font-size: 12px; color: #555; margin-bottom: 4px; padding-bottom: 2px; }
+         .info-section .settings-grid { margin-bottom: 4px; }
         .warning-text { font-size: 10px; color: #8a6d3b; text-align: center; margin-top: 4px; }
     </style>
 </head>
@@ -50,13 +45,13 @@
 
     <!-- Extension Settings -->
     <div class="settings-grid">
-        <label for="serverPort">Port (Tab):</label> <!-- Clarify scope -->
+        <label for="serverPort">Port:</label>
         <div class="control-area">
             <input type="number" id="serverPort" min="1025" max="65535" step="1">
             <button id="testConnectionBtn">Test</button>
         </div>
 
-        <label for="activationToggle">Active (Global):</label> <!-- Clarify scope -->
+        <label for="activationToggle">Active:</label>
         <div class="control-area">
              <label class="switch">
                 <input type="checkbox" id="activationToggle">
@@ -64,51 +59,42 @@
             </label>
         </div>
     </div>
+     <p class="warning-text" id="restartWarning" style="display: none;">*Port change requires server restart.</p>
 
     <!-- Server Information -->
      <div class="info-section">
-         <h2>Backend Info (via Test)</h2> <!-- Clarify source -->
+         <h2>Backend Info</h2>
          <div class="settings-grid">
              <label>Working Dir:</label>
              <div class="control-area">
-                 <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Test Conn...</span>
+                 <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Loading...</span>
              </div>
              <label>Save Dir:</label>
               <div class="control-area">
-                 <span id="serverSaveDirDisplay" class="info-text" title="Fallback save directory (relative)">Test Conn...</span>
+                 <span id="serverSaveDirDisplay" class="info-text" title="Fallback save directory (relative)">Loading...</span>
              </div>
-             <label>Log Dir:</label>
-             <div class="control-area">
-                 <span id="serverLogDirDisplay" class="info-text" title="Log directory (relative)">Test Conn...</span>
-             </div>
+             <!-- <label>Log Dir:</label> -->
+             <!-- <div class="control-area"> -->
+                 <!-- <span id="serverLogDirDisplay" class="info-text" title="Log directory (relative)">Loading...</span> -->
+             <!-- </div> -->
              <label>Git Repo:</label>
              <div class="control-area">
-                 <span id="serverGitStatusDisplay" class="info-text" title="Is CWD a Git repository?">Test Conn...</span>
+                 <span id="serverGitStatusDisplay" class="info-text" title="Is CWD a Git repository?">Loading...</span>
+             </div>
+             <!-- Display Auto-Run Status (Read-only from server flags) -->
+             <label>Py Auto-Run:</label>
+             <div class="control-area">
+                 <span id="serverPyRunStatus" class="info-text" title="Python Auto-Run (Set via server flag)">...</span>
+             </div>
+              <label>Sh Auto-Run:</label>
+             <div class="control-area">
+                 <span id="serverShRunStatus" class="info-text" title="Shell Auto-Run (Set via server flag)">...</span>
              </div>
          </div>
      </div>
 
-    <!-- Server Config Settings -->
-    <div class="config-section">
-        <h2>Backend Config (Live*)</h2> <!-- Clarify update mechanism -->
-         <div class="settings-grid">
-             <label>Auto-Run Py:</label>
-             <div class="control-area">
-                 <label class="switch">
-                     <input type="checkbox" id="serverEnablePython" disabled> <!-- Start disabled -->
-                     <span class="slider"></span>
-                 </label>
-             </div>
-             <label>Auto-Run Sh:</label>
-             <div class="control-area">
-                 <label class="switch">
-                     <input type="checkbox" id="serverEnableShell" disabled> <!-- Start disabled -->
-                     <span class="slider"></span>
-                 </label>
-             </div>
-        </div>
-         <p class="warning-text" id="restartWarning" style="display: none;">*Port change requires server restart for that port number.</p> <!-- Clarify warning -->
-    </div>
+    <!-- REMOVED Backend Config Section -->
+    <!-- <div class="config-section"> ... </div> -->
 
     <!-- Status Area -->
     <div id="status-container">
