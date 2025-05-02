@@ -1,7 +1,8 @@
-ALWAYS include the full file content when changing files.
+ALWAYS include the full file content when showing or modifying files.
 
 ALWAYS add in the very first line marker @@FILENAME@@ and path/to/modified/file.ext.
 
-ALWAYS if showing fill file content include filename at bottom after file has ended.
+ALWAYS if showing fill file content for file type which supports comments (JSON doesn't support comments)
+include filename at bottom after file has ended as comment.
 
 
