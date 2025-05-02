@@ -1,196 +1,254 @@
 // @@FILENAME@@ extension/popup.js
-document.addEventListener('DOMContentLoaded', () => {
-    // UI Elements
-    const portInput = document.getElementById('serverPort');
-    const activationToggle = document.getElementById('activationToggle');
+document.addEventListener('DOMContentLoaded', async () => {
+    const serverPortInput = document.getElementById('serverPort');
     const testConnectionBtn = document.getElementById('testConnectionBtn');
-    const statusDisplay = document.getElementById('last-response');
-    const enablePythonToggle = document.getElementById('serverEnablePython');
-    const enableShellToggle = document.getElementById('serverEnableShell');
-    const restartWarning = document.getElementById('restartWarning');
+    const activationToggle = document.getElementById('activationToggle');
+    const lastResponsePre = document.getElementById('last-response');
+
+    // Status display elements
     const serverCwdDisplay = document.getElementById('serverCwdDisplay');
     const serverSaveDirDisplay = document.getElementById('serverSaveDirDisplay');
     const serverLogDirDisplay = document.getElementById('serverLogDirDisplay');
     const serverGitStatusDisplay = document.getElementById('serverGitStatusDisplay');
 
-    let serverConfigLoaded = false;
-    let currentTabId = null; // Store the active tab ID for this popup instance
+    // Server config elements
+    const serverEnablePython = document.getElementById('serverEnablePython');
+    const serverEnableShell = document.getElementById('serverEnableShell');
+    const restartWarning = document.getElementById('restartWarning');
 
-    // --- Utility Functions ---
-    function updateStatus(message, type = 'info', showRestartMsg = false) { /* ... unchanged ... */ if (!statusDisplay) return; let displayMessage = (typeof message === 'string' || message instanceof String) ? message : JSON.stringify(message); statusDisplay.textContent = displayMessage; statusDisplay.className = ''; statusDisplay.classList.add(type); if (restartWarning) { restartWarning.style.display = showRestartMsg ? 'block' : 'none'; } console.log(`Popup status (${type}):`, displayMessage, `Restart Msg: ${showRestartMsg}`); }
-    function setServerTogglesDisabled(disabled) { /* ... unchanged ... */ enablePythonToggle.disabled = disabled; enableShellToggle.disabled = disabled; }
-    function updateServerInfoDisplay(serverStatus) { /* ... unchanged ... */ const naText = 'N/A'; const cwdPath = serverStatus?.working_directory; const saveDir = serverStatus?.save_directory; const logDir = serverStatus?.log_directory; const gitStatus = serverStatus?.is_git_repo; if (serverCwdDisplay) { serverCwdDisplay.textContent = cwdPath || naText; serverCwdDisplay.title = cwdPath || 'Could not load CWD'; } if (serverSaveDirDisplay) { serverSaveDirDisplay.textContent = saveDir ? `./${saveDir}` : naText; serverSaveDirDisplay.title = saveDir ? `./${saveDir}` : 'Could not load Save Dir'; } if (serverLogDirDisplay) { serverLogDirDisplay.textContent = logDir ? `./${logDir}` : naText; serverLogDirDisplay.title = logDir ? `./${logDir}` : 'Could not load Log Dir'; } if (serverGitStatusDisplay) { if (gitStatus === true) { serverGitStatusDisplay.textContent = 'Enabled'; serverGitStatusDisplay.className = 'info-text status-true'; serverGitStatusDisplay.title = 'Git repo detected.'; } else if (gitStatus === false) { serverGitStatusDisplay.textContent = 'Disabled'; serverGitStatusDisplay.className = 'info-text status-false'; serverGitStatusDisplay.title = 'Not a Git repo.'; } else { serverGitStatusDisplay.textContent = naText; serverGitStatusDisplay.className = 'info-text'; serverGitStatusDisplay.title = 'Could not determine Git status.'; } } }
-    function validatePortInput(portValue) { /* ... unchanged ... */ const port = parseInt(portValue, 10); const isValid = !isNaN(port) && port >= 1025 && port <= 65535; if (isValid) { portInput.classList.remove('invalid'); } else { portInput.classList.add('invalid'); } return isValid; }
+    const DEFAULT_PORT = 5000; // Keep consistent with background
+    let currentTabId = null; // Store the current tab's ID
+
+    function displayStatus(message, type = 'info') {
+        lastResponsePre.textContent = message;
+        lastResponsePre.className = ''; // Clear previous classes
+        lastResponsePre.classList.add(type);
+        console.log(`Popup Status [${type}]: ${message}`);
+    }
+
+    function updateServerInfoDisplay(details) {
+        serverCwdDisplay.textContent = details.working_directory || 'N/A';
+        serverCwdDisplay.title = details.working_directory || 'Server Current Working Directory';
+
+        serverSaveDirDisplay.textContent = details.save_directory || 'N/A';
+        serverSaveDirDisplay.title = `Fallback save directory (relative to ${details.working_directory || 'CWD'})`;
+
+        serverLogDirDisplay.textContent = details.log_directory || 'N/A';
+        serverLogDirDisplay.title = `Log directory (relative to ${details.working_directory || 'CWD'})`;
+
+        serverGitStatusDisplay.textContent = details.is_git_repo ? 'Yes' : 'No';
+        serverGitStatusDisplay.title = details.is_git_repo ? 'CWD is a Git repository' : 'CWD is not a Git repository';
+        serverGitStatusDisplay.classList.toggle('status-true', details.is_git_repo);
+        serverGitStatusDisplay.classList.toggle('status-false', !details.is_git_repo);
+
+        // Update toggles based on SERVER's current running state for the associated port
+        serverEnablePython.checked = details.auto_run_python || false;
+        serverEnableShell.checked = details.auto_run_shell || false;
+        serverEnablePython.disabled = false; // Enable controls after getting status
+        serverEnableShell.disabled = false;
+    }
+
+     // --- Helper to get current tab ID ---
+     async function getCurrentTabId() {
+         try {
+             let tabs = await browser.tabs.query({ active: true, currentWindow: true });
+             if (tabs && tabs.length > 0 && tabs[0].id) {
+                 return tabs[0].id;
+             }
+         } catch (error) {
+             console.error("Popup: Error querying for active tab:", error);
+         }
+         console.error("Popup: Could not get current tab ID.");
+         return null; // Indicate failure
+     }
+
 
     // --- Initialization ---
-    setServerTogglesDisabled(true);
-    updateServerInfoDisplay(null);
-    updateStatus('Initializing...', 'info');
 
-    // ** Get current tab ID first **
-    browser.tabs.query({ active: true, currentWindow: true })
-        .then((tabs) => {
-            if (!tabs || tabs.length === 0 || !tabs[0].id) {
-                throw new Error("Could not get active tab ID.");
+    // Disable server config toggles until status is fetched
+    serverEnablePython.disabled = true;
+    serverEnableShell.disabled = true;
+
+    displayStatus('Loading settings...');
+
+    // 0. Get current tab ID first
+    currentTabId = await getCurrentTabId();
+    if (currentTabId === null) {
+         displayStatus('Error: Could not identify the current tab. Port settings might not work correctly.', 'error');
+         // Proceed with defaults, but things might be broken
+    } else {
+        console.log(`Popup: Initializing for tab ID: ${currentTabId}`);
+    }
+
+
+    // 1. Fetch and set initial port value for THIS tab
+    try {
+        // **Send tabId with the request**
+        const portResponse = await browser.runtime.sendMessage({ action: "getPort", tabId: currentTabId });
+        const initialPort = portResponse?.port || DEFAULT_PORT;
+        serverPortInput.value = initialPort;
+        console.log(`Popup: Initial port for tab ${currentTabId} set to ${initialPort}`);
+    } catch (error) {
+        console.error(`Popup: Error getting initial port for tab ${currentTabId}:`, error);
+        serverPortInput.value = DEFAULT_PORT; // Fallback
+        displayStatus(`Error loading port for this tab: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
+    }
+
+    // 2. Fetch and set initial GLOBAL activation state (remains global)
+    try {
+        const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
+        activationToggle.checked = activationResponse?.isActive === true;
+        console.log(`Popup: Initial global activation state: ${activationToggle.checked}`);
+    } catch (error) {
+        console.error("Popup: Error getting initial activation state:", error);
+        activationToggle.checked = false; // Default to inactive on error
+        displayStatus(`Error loading activation state: ${error.message}.`, 'warning');
+    }
+
+    // 3. Attempt initial connection test (using the potentially tab-specific port now loaded)
+     if (currentTabId !== null) { // Only test if we have a tab ID
+        testConnectionBtn.click(); // Trigger test on load
+     } else {
+         displayStatus("Cannot perform initial connection test without Tab ID.", "warning");
+     }
+
+    // --- Event Listeners ---
+
+    // Validate and Store Port on Input
+    serverPortInput.addEventListener('input', () => {
+        if (currentTabId === null) {
+            displayStatus('Cannot save port setting - current tab ID unknown.', 'error');
+            return;
+        }
+        const portValue = serverPortInput.value.trim();
+        const portNumber = parseInt(portValue, 10);
+        let isValid = false;
+
+        if (portValue === '' || (!isNaN(portNumber) && portNumber >= 1025 && portNumber <= 65535)) {
+            serverPortInput.classList.remove('invalid');
+            isValid = true;
+            if (portValue !== '') {
+                 // **Send tabId with the store request**
+                 browser.runtime.sendMessage({ action: "storePort", tabId: currentTabId, port: portNumber })
+                     .then(response => {
+                         if (!response?.success) console.error(`Popup: Failed to store port for tab ${currentTabId}.`);
+                         else console.log(`Popup: Port ${portNumber} for tab ${currentTabId} sent to background.`);
+                     })
+                     .catch(err => console.error("Popup: Error sending storePort message:", err));
             }
-            currentTabId = tabs[0].id;
-            console.log("Popup loaded for Tab ID:", currentTabId);
-            loadExtensionSettings(); // Load settings now that we have the tab ID
-        })
-        .catch(error => {
-            console.error("Error getting current tab:", error);
-            updateStatus(`Error initializing popup: ${error.message}`, 'error');
-            // Disable interactive elements if we don't have a tab ID
-            portInput.disabled = true;
-            activationToggle.disabled = true;
-            testConnectionBtn.disabled = true;
-            setServerTogglesDisabled(true);
-            updateServerInfoDisplay(null);
-        });
-
-    // --- Load EXTENSION Settings ---
-    function loadExtensionSettings() {
-        if (!currentTabId) return; // Should not happen if called correctly
-        updateStatus('Loading settings...', 'info');
-        // ** Send Tab ID **
-        browser.runtime.sendMessage({ action: "getSettings", tabId: currentTabId })
-            .then(settings => {
-                console.log(`Popup received settings for Tab ${currentTabId}:`, settings);
-                let portIsValid = false;
-                if (settings?.port !== undefined) {
-                    portInput.value = settings.port; // This is the tab-specific or default port
-                    portIsValid = validatePortInput(settings.port);
-                } else { portInput.value = ''; portInput.classList.add('invalid'); }
-                activationToggle.checked = settings?.isActivated === true;
-
-                // Load server info using the determined port for this tab
-                if (portIsValid) { loadServerConfig(); }
-                else { updateStatus('Invalid port - cannot load server info.', 'warning'); updateServerInfoDisplay(null); setServerTogglesDisabled(true); }
-            })
-            .catch(error => {
-                console.error(`Error getting settings for Tab ${currentTabId}:`, error);
-                updateStatus(`Error loading settings: ${error.message}`, 'error');
-                portInput.classList.add('invalid'); portInput.value = ''; activationToggle.checked = false;
-                setServerTogglesDisabled(true); updateServerInfoDisplay(null);
-            });
-    }
-
-    // --- Function to Load SERVER Config & Info ---
-    function loadServerConfig() {
-        if (!currentTabId) return; // Need tab context
-        updateStatus('Loading server information...', 'info');
-        setServerTogglesDisabled(true); updateServerInfoDisplay(null); // Show loading
-        // ** Send Tab ID **
-        browser.runtime.sendMessage({ action: "getServerConfig", tabId: currentTabId })
-            .then(response => {
-                 if (response?.success && response.data) {
-                     const serverStatus = response.data;
-                     enablePythonToggle.checked = serverStatus.auto_run_python === true;
-                     enableShellToggle.checked = serverStatus.auto_run_shell === true;
-                     updateServerInfoDisplay(serverStatus); // Update CWD, Save, Log, Git
-                     updateStatus('Extension and server info loaded.', 'info');
-                     setServerTogglesDisabled(false); serverConfigLoaded = true;
-                 } else {
-                     const errorMsg = response?.error || 'Unknown error fetching server info.';
-                     updateStatus(`Could not load server info: ${errorMsg}`, 'error');
-                     enablePythonToggle.checked = false; enableShellToggle.checked = false;
-                     serverConfigLoaded = false; setServerTogglesDisabled(true); updateServerInfoDisplay(null);
-                 }
-            })
-            .catch(error => {
-                updateStatus(`Error contacting background for server info: ${error.message}`, 'error');
-                enablePythonToggle.checked = false; enableShellToggle.checked = false;
-                serverConfigLoaded = false; setServerTogglesDisabled(true); updateServerInfoDisplay(null);
-            });
-    }
-
-    // --- Event Listener for Port Input Change ---
-    portInput.addEventListener('input', () => {
-        if (!currentTabId) return; // Need tab context
-        const newPort = portInput.value;
-        serverConfigLoaded = false; setServerTogglesDisabled(true); updateServerInfoDisplay(null); // Mark stale
-
-        if (validatePortInput(newPort)) {
-            // ** Send Tab ID **
-            browser.runtime.sendMessage({ action: "updateSetting", key: "port", value: parseInt(newPort, 10), tabId: currentTabId })
-                .then(() => {
-                     updateStatus(`Port for this tab set to ${newPort}. Reloading server info...`, 'info');
-                     // Port change for a tab *might* mean connecting to a different server, so reload info
-                     loadServerConfig();
-                })
-                .catch(error => { updateStatus(`Error saving port: ${error.message}`, 'error'); updateServerInfoDisplay(null); });
-        } else { updateStatus('Invalid port number. Cannot load server info.', 'error'); updateServerInfoDisplay(null); }
+        } else {
+            serverPortInput.classList.add('invalid');
+        }
+        // Show restart warning if port differs from default (simplistic check)
+        restartWarning.style.display = (portValue !== '' && portNumber !== DEFAULT_PORT) ? 'block' : 'none';
     });
 
-    // --- Event Listener for Activation Toggle Change ---
-    activationToggle.addEventListener('change', () => {
-        // Activation is global, no tabId needed here
-        const newState = activationToggle.checked;
-        browser.runtime.sendMessage({ action: "updateSetting", key: "isActivated", value: newState })
-        .then(() => { updateStatus(`Auto-Capture ${newState ? 'Enabled' : 'Disabled'}`, 'info'); })
-        .catch(error => { updateStatus(`Error saving toggle state: ${error.message}`, 'error'); });
-    });
-
-    // --- Function to handle server config toggle changes ---
-    function handleServerConfigChange(key, value) {
-        if (!currentTabId) return; // Need context for messaging
-        if (!serverConfigLoaded) { updateStatus("Cannot save: server info not loaded.", "error"); return; }
-        updateStatus('Saving server configuration...', 'info'); setServerTogglesDisabled(true);
-        // ** Send Tab ID (although server uses it mainly for port, good practice)**
-        // Key is already lowercase (auto_run_python/shell)
-        browser.runtime.sendMessage({ action: "updateServerConfig", key: key, value: value, tabId: currentTabId })
-        .then(response => {
-             if (response?.success) {
-                 updateStatus(response.message || 'Server config updated.', 'success', false); // No restart warning needed
-                 // Re-sync UI just in case? Or trust the update worked. Fetching again might be overkill.
-             } else { updateStatus(`Failed to save server config: ${response?.message || response?.error || 'Unknown error'}`, 'error'); }
-        })
-        .catch(error => { updateStatus(`Error contacting background to save config: ${error.message}`, 'error'); })
-        .finally(() => { if (serverConfigLoaded) { setServerTogglesDisabled(false); } });
-    }
-
-    // --- Event Listeners for Server Config Toggles ---
-    enablePythonToggle.addEventListener('change', () => { handleServerConfigChange('auto_run_python', enablePythonToggle.checked); });
-    enableShellToggle.addEventListener('change', () => { handleServerConfigChange('auto_run_shell', enableShellToggle.checked); });
-
-    // --- Event Listener for Test Connection Button ---
+    // Test Connection Button
     testConnectionBtn.addEventListener('click', async () => {
-        if (!currentTabId) return; // Need tab context
-        testConnectionBtn.disabled = true; updateStatus('Testing connection...', 'info'); updateServerInfoDisplay(null); // Show loading
+        // Tests the *currently entered* port, not necessarily the stored one for the tab
+        const currentInputPort = parseInt(serverPortInput.value, 10);
+        if (isNaN(currentInputPort) || currentInputPort < 1025 || currentInputPort > 65535) {
+            displayStatus('Invalid port number in field. Enter 1025-65535.', 'error');
+            serverPortInput.classList.add('invalid');
+            return;
+        }
+        serverPortInput.classList.remove('invalid');
+
+        displayStatus(`Testing connection to port ${currentInputPort}...`, 'info');
+        testConnectionBtn.disabled = true;
 
         try {
-            // ** Send Tab ID **
-            const response = await browser.runtime.sendMessage({ action: "testConnection", tabId: currentTabId });
-            if (response?.success && response.data) {
-                 const serverStatus = response.data;
-                 let statusMsg = `Connection successful!\n`;
-                 // Use the port we *attempted* to connect to for display consistency
-                 statusMsg += `Using Port: ${portInput.value || '(default)'}\n`;
-                 // Display RUNNING state from the server
-                 statusMsg += `Server CWD: ${serverStatus?.working_directory || 'N/A'}\n`; // Show CWD here too
-                 statusMsg += `Py Auto-Run: ${serverStatus?.auto_run_python ?? '?'}\n`;
-                 statusMsg += `Sh Auto-Run: ${serverStatus?.auto_run_shell ?? '?'}\n`;
-                 statusMsg += `Git Repo: ${serverStatus?.is_git_repo ?? '?'}`;
-                 updateStatus(statusMsg, 'success');
-                 // Update all info displays and sync toggles
-                 updateServerInfoDisplay(serverStatus);
-                 enablePythonToggle.checked = serverStatus?.auto_run_python === true;
-                 enableShellToggle.checked = serverStatus?.auto_run_shell === true;
-                 serverConfigLoaded = true; setServerTogglesDisabled(false);
+            // Send the current input value to the background script for testing
+            const response = await browser.runtime.sendMessage({ action: "testConnection", port: currentInputPort });
+
+            if (response && response.success) {
+                displayStatus('Connection successful! Server status loaded.', 'success');
+                updateServerInfoDisplay(response.details);
+                 // Update the input field ONLY if the server reports a DIFFERENT port than tested
+                 // This indicates the user might be testing one port while the server for *this tab* runs elsewhere
+                const serverReportedPort = response.details.port;
+                 if (serverReportedPort && serverReportedPort !== currentInputPort) {
+                     // serverPortInput.value = serverReportedPort; // Decide if you want this behavior
+                     console.warn(`Popup: Test connection to ${currentInputPort} successful, but server reported running on ${serverReportedPort}.`);
+                 } else {
+                     console.log(`Popup: Test connection OK to port ${currentInputPort}. Server details:`, response.details);
+                 }
             } else {
-                 let errorMsg = 'Connection failed.';
-                 if (response?.error) { errorMsg += `\nReason: ${response.error}`; }
-                 else { errorMsg += ` Using Port: ${portInput.value || '(default)'}. Check server status.`; }
-                 updateStatus(errorMsg, 'error'); updateServerInfoDisplay(null);
-                 serverConfigLoaded = false; setServerTogglesDisabled(true);
+                 let errorMsg = response?.details?.message || `Connection failed to port ${currentInputPort}. Is a server running there?`;
+                 displayStatus(errorMsg, 'error');
+                 updateServerInfoDisplay({}); // Clear fields on failure
+                 console.error(`Popup: Test connection to ${currentInputPort} failed:`, response?.details);
             }
         } catch (error) {
-            updateStatus(`Error testing connection: ${error.message}`, 'error');
-            updateServerInfoDisplay(null); serverConfigLoaded = false; setServerTogglesDisabled(true);
-        } finally { testConnectionBtn.disabled = false; }
+            displayStatus(`Error testing connection: ${error.message}`, 'error');
+            updateServerInfoDisplay({});
+            console.error("Popup: Error sending testConnection message:", error);
+        } finally {
+            testConnectionBtn.disabled = false;
+        }
     });
 
-     // --- Listener for status updates from background ---
-     browser.runtime.onMessage.addListener((message, sender) => { /* ... unchanged ... */ if (message.action === "updatePopupStatus") { updateStatus(message.message, message.type || 'info'); return Promise.resolve(); } return false; });
+    // Activation Toggle Change (Remains Global)
+    activationToggle.addEventListener('change', () => {
+        const isActive = activationToggle.checked;
+        browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
+            .then(response => {
+                if (!response?.success) console.error("Popup: Failed to store activation state.");
+                else console.log(`Popup: Global activation state stored: ${isActive}`);
+            })
+            .catch(err => console.error("Popup: Error sending storeActivationState message:", err));
+            displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
+    });
+
+
+    // Server Config Toggles Change (Target server based on this tab's stored port)
+    async function handleConfigToggleChange(settingKey, isEnabled) {
+        if (currentTabId === null) {
+            displayStatus('Cannot update config - current tab ID unknown.', 'error');
+            return false; // Indicate failure to caller
+        }
+        const settingLabel = settingKey === 'auto_run_python' ? 'Python' : 'Shell';
+        const statusType = (settingKey === 'auto_run_shell' && isEnabled) ? 'warning' : 'info';
+        displayStatus(`Sending ${settingLabel} auto-run (${isEnabled}) to server for this tab...`, statusType);
+
+        try {
+            // Background script will use getPortForTab(senderTabId) to find the right server
+            const response = await browser.runtime.sendMessage({
+                action: "updateConfig",
+                // No need to send tabId, background uses sender.tab.id
+                settings: { [settingKey]: isEnabled }
+            });
+            if (response && response.success) {
+                 const finalStatusType = (settingKey === 'auto_run_shell' && isEnabled) ? 'warning' : 'success';
+                displayStatus(response.details.message || `${settingLabel} auto-run for this tab ${isEnabled ? 'enabled' : 'disabled'}.`, finalStatusType);
+                console.log("Popup: Update config success:", response.details);
+                return true;
+            } else {
+                displayStatus(`Failed to update ${settingLabel} auto-run: ${response?.details?.message || 'Unknown error'}`, 'error');
+                 console.error("Popup: Update config failed:", response?.details);
+                 return false;
+            }
+        } catch (error) {
+             displayStatus(`Error updating ${settingLabel} auto-run: ${error.message}`, 'error');
+             console.error("Popup: Error sending updateConfig message:", error);
+             return false;
+        }
+    }
+
+    serverEnablePython.addEventListener('change', async (event) => {
+        const isEnabled = event.target.checked;
+        event.target.disabled = true;
+        const success = await handleConfigToggleChange('auto_run_python', isEnabled);
+        if (!success) event.target.checked = !isEnabled; // Revert UI on failure
+        event.target.disabled = false;
+    });
+
+    serverEnableShell.addEventListener('change', async (event) => {
+        const isEnabled = event.target.checked;
+         event.target.disabled = true;
+         const success = await handleConfigToggleChange('auto_run_shell', isEnabled);
+         if (!success) event.target.checked = !isEnabled; // Revert UI on failure
+         event.target.disabled = false;
+     });
+
 });
-// @@FILENAME@@ extension/popup.js
