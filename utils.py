@@ -7,7 +7,8 @@ import unicodedata
 import json # For language patterns if needed, or move patterns here
 
 # --- Constants ---
-FILENAME_EXTRACT_REGEX = re.compile(r"^\s*(?://|#)\s*@@FILENAME@@\s+(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+# *** UPDATED REGEX: Optional comment group (?:...)? and NO MULTILINE flag ***
+FILENAME_EXTRACT_REGEX = re.compile(r"^\s*(?:(?://|#)\s*)?@@FILENAME@@\s+(.+?)\s*$", re.IGNORECASE)
 FILENAME_SANITIZE_REGEX = re.compile(r'[^\w\.\-\/]+')
 MAX_FILENAME_LENGTH = 200
 LANGUAGE_PATTERNS = {
@@ -27,16 +28,21 @@ def sanitize_filename(filename: str) -> str | None:
     """Sanitizes a filename or relative path."""
     if not filename or filename.isspace(): return None
     filename = filename.strip()
+    # Reject absolute paths or paths attempting directory traversal
     if filename.startswith(('/', '\\')) or '..' in Path(filename).parts:
         # print(f"W: Rejected potentially unsafe path pattern: {filename}", file=sys.stderr) # Consider logging instead
         return None
-    if Path(filename).name.startswith('.'):
-        # print(f"W: Rejected path ending in hidden file/directory: {filename}", file=sys.stderr)
-        return None
+    # Reject filenames starting with '.' (hidden files/dirs) in any part
+    if any(part.startswith('.') for part in Path(filename).parts if part):
+         # print(f"W: Rejected path containing hidden file/directory segment: {filename}", file=sys.stderr)
+         return None
+
     filename = filename.replace('\\', '/')
     parts = filename.split('/')
     sanitized_parts = []
     for part in parts:
+        if not part: # Handle potential empty parts from multiple slashes "//"
+            continue
         # Replace disallowed characters with underscore
         sanitized_part = FILENAME_SANITIZE_REGEX.sub('_', part)
         # Remove leading/trailing underscores that might result from replacement
@@ -47,25 +53,34 @@ def sanitize_filename(filename: str) -> str | None:
             return None
         sanitized_parts.append(sanitized_part)
 
+    if not sanitized_parts: # e.g., input was just "/" or similar
+        return None
+
     sanitized = '/'.join(sanitized_parts)
 
-    # Length check
+    # Length check on the whole path
     if len(sanitized) > MAX_FILENAME_LENGTH:
-        # print(f"W: Sanitized path too long ('{sanitized}'), might be truncated.", file=sys.stderr)
-        base, ext = os.path.splitext(sanitized)
-        original_ext = Path(filename).suffix
-        max_base_len = MAX_FILENAME_LENGTH - len(original_ext if original_ext else '')
-        if max_base_len < 1: sanitized = sanitized[:MAX_FILENAME_LENGTH]
-        else: sanitized = base[:max_base_len] + (original_ext if original_ext else '')
+        # Simple truncation for now, might need smarter logic if needed
+        sanitized = sanitized[:MAX_FILENAME_LENGTH]
+        # print(f"W: Sanitized path too long, truncated to: '{sanitized}'", file=sys.stderr)
+        # Ensure truncation didn't leave just "." or ".." as the final component
+        final_name = Path(sanitized).name
+        if final_name == '.' or final_name == '..': return None
 
+
+    # Ensure final component has a valid name and suffix
     final_path = Path(sanitized)
     if not final_path.name or final_path.name.startswith('.'):
          # print(f"W: Final sanitized path has empty or hidden basename: '{sanitized}'. Rejecting.", file=sys.stderr)
          return None
-    if not final_path.suffix or len(final_path.suffix) < 2:
+
+    # Check for extension, add default if missing or invalid (e.g., just ".")
+    if not final_path.suffix or len(final_path.suffix) < 2 or final_path.suffix == '.':
         # print(f"W: Sanitized path '{sanitized}' lacks proper extension. Appending {DEFAULT_EXTENSION}", file=sys.stderr)
         sanitized += DEFAULT_EXTENSION
+
     return sanitized
+
 
 def detect_language_and_extension(code: str) -> tuple[str, str]:
     """Detects language and returns (extension, language_name)."""
@@ -108,4 +123,5 @@ def generate_timestamped_filepath(save_folder_path: Path, extension: str = '.txt
              # print(f"W: Could not find unique filename for prefix '{safe_base_prefix}' after 999 attempts. Adding timestamp.", file=sys.stderr)
              fallback_filename = f"{safe_base_prefix}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{extension}"
              return str((save_folder_path / fallback_filename).resolve())
+
 # @@FILENAME@@ utils.py
