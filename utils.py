@@ -7,8 +7,8 @@ import unicodedata
 import json # For language patterns if needed, or move patterns here
 
 # --- Constants ---
-# Match marker ONLY at the start, after optional whitespace
-FILENAME_EXTRACT_REGEX = re.compile(r"^\s*@@FILENAME@@\s+(.+?)\s*$", re.IGNORECASE)
+# *** UPDATED REGEX: Made the main capture group greedy (.+) ***
+FILENAME_EXTRACT_REGEX = re.compile(r"^\s*@@FILENAME@@\s+(.+)\s*", re.IGNORECASE)
 FILENAME_SANITIZE_REGEX = re.compile(r'[^\w\.\-\/]+')
 MAX_FILENAME_LENGTH = 200
 LANGUAGE_PATTERNS = {
@@ -123,3 +123,4 @@ def generate_timestamped_filepath(save_folder_path: Path, extension: str = '.txt
              # print(f"W: Could not find unique filename for prefix '{safe_base_prefix}' after 999 attempts. Adding timestamp.", file=sys.stderr)
              fallback_filename = f"{safe_base_prefix}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{extension}"
              return str((save_folder_path / fallback_filename).resolve())
+# @@FILENAME@@ utils.py
