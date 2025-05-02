@@ -1,4 +1,3 @@
-@@FILENAME@@ verify.md
 **Consolidated Verification List (Simplified - No UI Auto-Run Control / Log Files)**
 
 **I. Core Code Capture & Highlighting (Content Script)**

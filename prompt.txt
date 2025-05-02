@@ -1,4 +1,3 @@
-@@FILENAME@@ prompt.txt
 **CRUCIAL INSTRUCTIONS FOR CODE BLOCK FORMATTING:**
 
 1.  **Show Full Content:** When you are asked to show the modified content of a file, ALWAYS provide the *complete* file content in the code block.
