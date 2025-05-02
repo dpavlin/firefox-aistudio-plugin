@@ -1,6 +1,6 @@
 # AI Code Capture
 
-Firefox plugin for Google AI Studio integration with local file system 
+Firefox plugin for Google AI Studio integration with local file system
 
 ## Motivation
 
@@ -42,10 +42,17 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 ## Google AI Studio Prompt Instructions
 
-**Crucial:** Instruct the AI how to format its output. Include this in your prompt:
+**CRUCIAL INSTRUCTIONS FOR CODE BLOCK FORMATTING:**
 
-> ALWAYS include the full file content when changing files.
-> ALWAYS add a comment in the **very first line** specifying the filename with the marker `@@FILENAME@@ path/to/your/file.ext`
+1.  **Show Full Content:** When you are asked to show the modified content of a file, ALWAYS provide the *complete* file content in the code block.
+2.  **Mandatory Filename Marker:** You **MUST** include a filename marker at the very beginning of the code block.
+3.  **Marker Format:** The marker format is *exactly*:
+    `@@FILENAME@@ path/relative/to/project/root.ext`
+    *(Replace `path/relative/to/project/root.ext` with the correct file path relative to the project root.)*
+4.  **Strict First Line Placement:** The `@@FILENAME@@` marker **MUST** be on the **VERY FIRST LINE** of the code block.
+5.  **No Prefix:** Do **NOT** put *anything* before the `@@FILENAME@@` marker on the first line (no comments like `//` or `#`, no code, nothing except optional leading whitespace which is ignored).
+6.  **Code Starts on Line 2:** The actual code content of the file **MUST** begin on the second line.
+7.  **(Optional) End Marker:** For clarity in our chat, you *may* add a separator line after the *entire* code block, like `--- END OF @@FILENAME@@ path/to/file.ext ---`.
 
 ## Git Integration
 
@@ -55,4 +62,5 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 ## Multiple Projects in Separate Tabs
 
 *   Use the server's `--port <number>` option to run multiple instances on different ports for different projects.
-*   Configure the matching port number in the extension popup for each corresponding AI Studio tab.
+*   Configure the matching port number in the extension popup **for each corresponding AI Studio tab**. The port setting is now tab-specific.
+

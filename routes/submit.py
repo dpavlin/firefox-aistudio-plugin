@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # @@FILENAME@@ routes/submit.py
 
 from flask import Blueprint, jsonify, request, current_app
@@ -254,4 +255,3 @@ def submit_code_route():
         else:
              print("W: Lock was not held by this thread in finally block?", file=sys.stderr)
 
-# @@FILENAME@@ routes/submit.py

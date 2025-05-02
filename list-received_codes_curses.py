@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# @@FILENAME@@ list-received_codes_curses.py
 
 # list-received_codes_curses.py: Interactive viewer using Python curses.
 # Shows filename, size, mod time (YYYY-MM-DD HH:MM:SS, newest first).
@@ -28,6 +29,8 @@ def check_dependencies():
 def get_files_list(codes_dir: Path) -> list[Path]:
     """Gets the list of latest file paths, sorted newest first."""
     try:
+        if not codes_dir.is_dir():
+            return []
         all_entries = list(codes_dir.iterdir())
         files = [p for p in all_entries if p.is_file()]
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True) # Sort newest first
@@ -274,7 +277,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt: print("\nOperation cancelled by user (Ctrl+C).")
     except Exception as e: print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
     finally:
+        # Ensure curses window is properly closed on exit
         try:
-             if sys.stdout.isatty(): curses.endwin()
+             if sys.stdout.isatty() and curses.isendwin() is False:
+                 curses.endwin()
         except Exception: pass
-        sys.exit(0)
+        # Exit code 0 for clean exit, non-zero handled by sys.exit elsewhere
+        # sys.exit(0) # Avoid double exit if main loop breaks with error
+

@@ -3,6 +3,7 @@
 
 import sys
 import threading
+import os # Needed for exception check
 from flask import Flask
 from flask_cors import CORS
 
@@ -46,9 +47,9 @@ if __name__ == '__main__':
     host_ip = '127.0.0.1'
     port_num = config['SERVER_PORT']
 
-    print(f"--- AI Code Capture Server (Refactored) ---")
+    print(f"--- AI Code Capture Server ---")
     print(f"Config File Path: '{config['CONFIG_FILE']}' ({'Exists' if config['CONFIG_FILE'].is_file() else 'Not Found'})")
-    print(f"  Config File Content: {config['loaded_file_config']}")
+    # print(f"  Config File Content: {config['loaded_file_config']}") # Might be too verbose
     print("-" * 30)
     # This block prints the effective RUNTIME settings using the lowercase keys
     print(f"Effective RUNNING Settings:")
@@ -64,7 +65,7 @@ if __name__ == '__main__':
     print(f"Starting Flask server on http://{host_ip}:{port_num}")
     print("Use Ctrl+C to stop the server.")
     print(f"NOTE: Auto-run settings changed via popup apply immediately.", file=sys.stderr) # Updated Note
-    print(f"      Port changes require a server restart.", file=sys.stderr)
+    print(f"      Port changes require a server restart for that specific port.", file=sys.stderr)
     print("--- Server ready ---", file=sys.stderr)
 
     try:
@@ -78,4 +79,3 @@ if __name__ == '__main__':
     except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)
     except Exception as e: print(f"\nE: Unexpected error during startup: {e}", file=sys.stderr); sys.exit(1)
 
-# @@FILENAME@@ server.py

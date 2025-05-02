@@ -1,8 +1,14 @@
-ALWAYS include the full file content when showing or modifying files.
+```
+**CRUCIAL INSTRUCTIONS FOR CODE BLOCK FORMATTING:**
 
-ALWAYS add in the very first line marker @@FILENAME@@ and path/to/modified/file.ext.
+1.  **Show Full Content:** When you are asked to show the modified content of a file, ALWAYS provide the *complete* file content in the code block.
+2.  **Mandatory Filename Marker:** You **MUST** include a filename marker at the very beginning of the code block.
+3.  **Marker Format:** The marker format is *exactly*:
+    `@@FILENAME@@ path/relative/to/project/root.ext`
+    *(Replace `path/relative/to/project/root.ext` with the correct file path relative to the project root.)*
+4.  **Strict First Line Placement:** The `@@FILENAME@@` marker **MUST** be on the **VERY FIRST LINE** of the code block.
+5.  **No Prefix:** Do **NOT** put *anything* before the `@@FILENAME@@` marker on the first line (no comments like `//` or `#`, no code, nothing except optional leading whitespace which is ignored).
+6.  **Code Starts on Line 2:** The actual code content of the file **MUST** begin on the second line.
+7.  **(Optional) End Marker:** For clarity in our chat, you *may* add a separator line after the *entire* code block, like `--- END OF @@FILENAME@@ path/to/file.ext ---`.
 
-ALWAYS if showing fill file content for file type which supports comments (JSON doesn't support comments)
-include filename at bottom after file has ended as comment.
-
-
+**Why is this important?** An automated tool reads your code blocks. It *strictly* expects the `@@FILENAME@@` marker on the first line to identify the file and removes that line before saving. Any deviation will cause errors.

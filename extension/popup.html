@@ -50,13 +50,13 @@
 
     <!-- Extension Settings -->
     <div class="settings-grid">
-        <label for="serverPort">Port:</label>
+        <label for="serverPort">Port (Tab):</label> <!-- Clarify scope -->
         <div class="control-area">
             <input type="number" id="serverPort" min="1025" max="65535" step="1">
             <button id="testConnectionBtn">Test</button>
         </div>
 
-        <label for="activationToggle">Active:</label>
+        <label for="activationToggle">Active (Global):</label> <!-- Clarify scope -->
         <div class="control-area">
              <label class="switch">
                 <input type="checkbox" id="activationToggle">
@@ -67,47 +67,47 @@
 
     <!-- Server Information -->
      <div class="info-section">
-         <h2>Backend Info</h2>
+         <h2>Backend Info (via Test)</h2> <!-- Clarify source -->
          <div class="settings-grid">
              <label>Working Dir:</label>
              <div class="control-area">
-                 <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Loading...</span>
+                 <span id="serverCwdDisplay" class="info-text" title="Server Current Working Directory">Test Conn...</span>
              </div>
              <label>Save Dir:</label>
               <div class="control-area">
-                 <span id="serverSaveDirDisplay" class="info-text" title="Fallback save directory (relative)">Loading...</span>
+                 <span id="serverSaveDirDisplay" class="info-text" title="Fallback save directory (relative)">Test Conn...</span>
              </div>
              <label>Log Dir:</label>
              <div class="control-area">
-                 <span id="serverLogDirDisplay" class="info-text" title="Log directory (relative)">Loading...</span>
+                 <span id="serverLogDirDisplay" class="info-text" title="Log directory (relative)">Test Conn...</span>
              </div>
              <label>Git Repo:</label>
              <div class="control-area">
-                 <span id="serverGitStatusDisplay" class="info-text" title="Is CWD a Git repository?">Loading...</span>
+                 <span id="serverGitStatusDisplay" class="info-text" title="Is CWD a Git repository?">Test Conn...</span>
              </div>
          </div>
      </div>
 
     <!-- Server Config Settings -->
     <div class="config-section">
-        <h2>Backend Config (Live*)</h2>
+        <h2>Backend Config (Live*)</h2> <!-- Clarify update mechanism -->
          <div class="settings-grid">
              <label>Auto-Run Py:</label>
              <div class="control-area">
                  <label class="switch">
-                     <input type="checkbox" id="serverEnablePython">
+                     <input type="checkbox" id="serverEnablePython" disabled> <!-- Start disabled -->
                      <span class="slider"></span>
                  </label>
              </div>
              <label>Auto-Run Sh:</label>
              <div class="control-area">
                  <label class="switch">
-                     <input type="checkbox" id="serverEnableShell">
+                     <input type="checkbox" id="serverEnableShell" disabled> <!-- Start disabled -->
                      <span class="slider"></span>
                  </label>
              </div>
         </div>
-         <p class="warning-text" id="restartWarning" style="display: none;">*Port change requires server restart.</p> <!-- Simplified warning -->
+         <p class="warning-text" id="restartWarning" style="display: none;">*Port change requires server restart for that port number.</p> <!-- Clarify warning -->
     </div>
 
     <!-- Status Area -->

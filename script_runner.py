@@ -24,22 +24,24 @@ def run_script(filepath: str, script_type: str, log_folder_path: Path) -> tuple[
 
     filename_base = filepath_obj.stem
     logpath = log_folder_path / f"{filename_base}_{script_type}_run.log"
-    run_cwd = filepath_obj.parent
+    run_cwd = filepath_obj.parent # Run script in its own directory
 
     command = []
     interpreter_name = ""
     log_content = "" # Initialize log content
 
     if script_type == 'python':
-        python_exe = sys.executable or shutil.which("python3") or shutil.which("python") or "python"
-        if not shutil.which(python_exe):
-             err_msg = f"Error: Python interpreter '{python_exe}' not found.\n"
+        # Prefer sys.executable to ensure using the same Python that runs the server
+        python_exe = sys.executable or shutil.which("python3") or shutil.which("python")
+        if not python_exe or not Path(python_exe).is_file():
+             err_msg = f"Error: Python interpreter '{python_exe}' not found or invalid.\n"
              print(f"E: {err_msg.strip()}", file=sys.stderr)
              _write_log(logpath, err_msg); return False, str(logpath)
         command = [python_exe, str(filepath_obj)]
         interpreter_name = Path(python_exe).name
         print(f"Executing Python ({interpreter_name}): {' '.join(command)} in '{run_cwd}'", file=sys.stderr)
     elif script_type == 'shell':
+        # Prefer bash if available, fallback to sh
         shell_exe = shutil.which("bash") or shutil.which("sh")
         if not shell_exe:
              err_msg = "Error: No 'bash' or 'sh' interpreter found.\n"
@@ -54,7 +56,12 @@ def run_script(filepath: str, script_type: str, log_folder_path: Path) -> tuple[
 
     log_content += f"--- COMMAND ---\n{' '.join(command)}\n--- CWD ---\n{run_cwd}\n"
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=15, encoding='utf-8', check=False, cwd=run_cwd)
+        result = subprocess.run(
+            command,
+            capture_output=True, text=True, timeout=15, encoding='utf-8',
+            check=False, # Don't raise exception on non-zero exit code
+            cwd=run_cwd  # Execute in the script's directory
+        )
         log_content += f"--- STDOUT ---\n{result.stdout}\n--- STDERR ---\n{result.stderr}\n--- Return Code: {result.returncode} ---\n"
         _write_log(logpath, log_content)
         print(f"Exec finished ({script_type}). RC: {result.returncode}. Log: {logpath.name}", file=sys.stderr)
@@ -65,7 +72,8 @@ def run_script(filepath: str, script_type: str, log_folder_path: Path) -> tuple[
         _write_log(logpath, log_content)
         return False, str(logpath)
     except FileNotFoundError:
-        err_msg = f"--- ERROR ---\nScript file '{filepath_obj}' or CWD '{run_cwd}' not found during execution.\n"
+        # Could be interpreter or script file if cwd changed unexpectedly
+        err_msg = f"--- ERROR ---\nExecutable '{command[0]}' or script file '{filepath_obj}' not found during execution (CWD: {run_cwd}).\n"
         print(f"E: {err_msg.strip()}", file=sys.stderr)
         log_content += err_msg
         _write_log(logpath, log_content)
@@ -89,15 +97,20 @@ def check_shell_syntax(filepath: str, log_folder_path: Path) -> tuple[bool, str 
 
     checker_exe = shutil.which("bash")
     if not checker_exe:
-        err_msg = "Error: 'bash' command not found for syntax check.\n"
+        err_msg = "Warning: 'bash' command not found for syntax check. Skipping check.\n"
         print(f"W: {err_msg.strip()}", file=sys.stderr)
-        _write_log(logpath, err_msg); return False, str(logpath)
+        # Don't write log, just return True (as we skipped the check)
+        return True, None # Treat as OK if bash not found, can't check
 
     command = [checker_exe, '-n', str(filepath_obj)]
     log_content = f"--- COMMAND ---\n{' '.join(command)}\n"
     print(f"Checking Shell syntax: {' '.join(command)}", file=sys.stderr)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=10, encoding='utf-8', check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True, text=True, timeout=10, encoding='utf-8',
+            check=False # Don't raise exception on non-zero exit code
+        )
         syntax_ok = result.returncode == 0
         status_msg = "OK" if syntax_ok else f"ERROR (RC: {result.returncode})"
         log_content += f"--- STATUS: {status_msg} ---\n--- STDOUT ---\n{result.stdout}\n--- STDERR ---\n{result.stderr}\n"
@@ -106,10 +119,11 @@ def check_shell_syntax(filepath: str, log_folder_path: Path) -> tuple[bool, str 
         else: print(f"Shell syntax Error for {filepath_obj.name}. RC: {result.returncode}. Log: {logpath.name}", file=sys.stderr)
         return syntax_ok, str(logpath)
     except FileNotFoundError:
+        # This would mean 'bash' disappeared between shutil.which and subprocess.run
         err_msg = f"--- ERROR ---\nSyntax check command '{checker_exe}' not found during execution.\n"
         print(f"E: {err_msg.strip()}", file=sys.stderr)
         log_content += err_msg
-        _write_log(logpath, log_content); return False, str(logpath)
+        _write_log(logpath, log_content); return False, str(logpath) # Treat as error if bash disappears
     except subprocess.TimeoutExpired:
         err_msg = "--- ERROR ---\nShell syntax check timed out after 10 seconds.\n"
         print(f"E: Shell syntax check timed out for {filepath_obj.name}", file=sys.stderr)
@@ -120,4 +134,3 @@ def check_shell_syntax(filepath: str, log_folder_path: Path) -> tuple[bool, str 
         print(f"E: Unexpected error checking shell syntax for {filepath_obj.name}: {e}", file=sys.stderr)
         log_content += err_msg
         _write_log(logpath, log_content); return False, str(logpath)
-# @@FILENAME@@ script_runner.py

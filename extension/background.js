@@ -64,7 +64,8 @@ async function setPortForTab(tabId, port) {
 async function getActivationState() {
     try {
         let data = await browser.storage.local.get(STORAGE_ACTIVE_KEY);
-        return data?.[STORAGE_ACTIVE_KEY] !== false; // Default to active
+        // Default to true if not set
+        return data?.[STORAGE_ACTIVE_KEY] !== false;
     } catch (error) {
         console.error("Background: Error getting activation state:", error);
         return true; // Default to active on error
@@ -125,6 +126,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     const isActive = await getActivationState();
     if (!isActive) {
         console.log("Background: Extension inactive, ignoring submitCode.");
+         // Send specific inactive status back
          return Promise.resolve({ success: false, details: { status: 'inactive', message: 'Extension is currently inactive.' } });
     }
      if (typeof senderTabId !== 'number') {
@@ -156,6 +158,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
       const data = await response.json();
       console.log("Background: Received response from server for /submit_code:", data);
+      // Ensure top-level success reflects server status
       return Promise.resolve({ success: data.status === 'success', details: data });
 
     } catch (error) {
@@ -179,7 +182,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
           }
           const url = `http://127.0.0.1:${port}/test_connection`;
           console.log(`Background: Testing connection to ${url} (requested by popup)`);
-          const response = await fetch(url, {cache: "no-store"});
+          const response = await fetch(url, {cache: "no-store"}); // Prevent caching
           if (!response.ok) {
                // Try to get more details if possible
                const errorText = await response.text().catch(() => `Server returned status ${response.status}`);
@@ -215,6 +218,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
              }
              const data = await response.json();
              console.log("Background: Config update response:", data);
+             // Ensure top-level success reflects server status
              return Promise.resolve({ success: data.status === 'success', details: data });
          } catch (error) {
              console.error("Background: Update config failed:", error);
@@ -225,7 +229,8 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
   // Default fallback if action not handled
   console.warn(`Background: Unhandled message action: ${request.action}`);
-  return Promise.resolve({ success: false, details: { message: `Unhandled action: ${request.action}` }});
+  // Return a promise resolving to an error structure
+  return Promise.resolve({ success: false, details: { status: 'error', message: `Unhandled action: ${request.action}` }});
 
 });
 

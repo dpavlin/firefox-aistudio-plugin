@@ -1,4 +1,4 @@
-@@FILENAME@@ utils.py
+# @@FILENAME@@ utils.py
 import re
 import os
 from pathlib import Path
@@ -123,4 +123,3 @@ def generate_timestamped_filepath(save_folder_path: Path, extension: str = '.txt
              # print(f"W: Could not find unique filename for prefix '{safe_base_prefix}' after 999 attempts. Adding timestamp.", file=sys.stderr)
              fallback_filename = f"{safe_base_prefix}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{extension}"
              return str((save_folder_path / fallback_filename).resolve())
-# @@FILENAME@@ utils.py

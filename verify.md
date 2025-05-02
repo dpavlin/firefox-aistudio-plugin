@@ -69,5 +69,3 @@
 49. **Verify that** command-line arguments (`--port`, `--shell`, `--enable-python-run`) correctly override settings from the config file or defaults for the *running server instance* (`config_manager.py`).
 50. **Verify that** the `/update_config` endpoint saves changes (port, auto-run flags) back to `server_config.json` (`config_manager.py`).
 51. **Verify that** the `/update_config` endpoint updates the *live runtime configuration* for `auto_run_python` and `auto_run_shell` in the `APP_CONFIG` dictionary used by the running server instance (`routes/config_routes.py`).
-
---- END OF @@FILENAME@@ verify.md ---
