@@ -1,5 +1,4 @@
-// @@FILENAME@@ extension/content.js
-// Debounce function (remains the same)
+// Debounce function (assuming it exists)
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -12,7 +11,7 @@ function debounce(func, wait) {
     };
 }
 
-console.log("AI Code Capture: Content script loaded (V2 - Stabilization Logic).");
+console.log("AI Code Capture: Content script loaded (V3 - Pending Highlight).");
 
 // --- Configuration ---
 const FILENAME_MARKER = '@@FILENAME@@';
@@ -34,9 +33,10 @@ function removeAllHighlights(element) {
     if (element) {
         element.classList.remove(
             'aicapture-highlight',
+            'aicapture-pending', // Added pending here
             'aicapture-success',
-            'aicapture-error',
-            'aicapture-fadeout' // Just in case
+            'aicapture-error'
+            // No fadeout class anymore
         );
     }
 }
@@ -45,6 +45,7 @@ function removeAllHighlights(element) {
 function sendCodeToServer(highlightTarget, codeElement) {
     if (!highlightTarget || !codeElement || processedBlocks.has(highlightTarget)) {
         console.log("AICapture: Skipping send - already processed or invalid.", highlightTarget);
+        removeAllHighlights(highlightTarget); // Clean up just in case
         return; // Don't send if already processed or elements missing
     }
 
@@ -52,8 +53,8 @@ function sendCodeToServer(highlightTarget, codeElement) {
 
     // Final check for marker before sending
     if (!codeContent.trimStart().startsWith(FILENAME_MARKER)) {
-        console.log("AICapture: Skipping send - marker disappeared?", highlightTarget);
-        removeAllHighlights(highlightTarget); // Clean up any temporary highlight
+        console.log("AICapture: Skipping send - marker disappeared before send?", highlightTarget);
+        removeAllHighlights(highlightTarget); // Clean up any temporary/pending highlight
         return;
     }
 
@@ -61,8 +62,8 @@ function sendCodeToServer(highlightTarget, codeElement) {
     processedBlocks.add(highlightTarget);
     console.log("AICapture: Stabilization complete. Sending code for:", highlightTarget);
 
-    // Apply temporary processing highlight (optional, could just wait for final)
-    removeAllHighlights(highlightTarget); // Ensure clean state
+    // ** Remove pending, apply processing highlight **
+    removeAllHighlights(highlightTarget); // Ensure clean state (removes pending)
     highlightTarget.classList.add('aicapture-highlight'); // Yellow while sending
 
     // Send to background script
@@ -113,7 +114,8 @@ function resetStabilizationTimer(highlightTarget, codeElement) {
              stabilizationTimers.delete(highlightTarget);
              console.log("AICapture: Marker removed, clearing timer for:", highlightTarget);
          }
-         removeAllHighlights(highlightTarget); // Remove any previous highlight
+         // ** Remove any lingering pending highlight if marker gone **
+         removeAllHighlights(highlightTarget); // Use helper to be safe
          return; // Don't start a new timer if marker is gone
     }
 
@@ -123,16 +125,19 @@ function resetStabilizationTimer(highlightTarget, codeElement) {
         clearTimeout(stabilizationTimers.get(highlightTarget));
         // console.log("AICapture: Resetting timer for:", highlightTarget);
     } else {
-        // console.log("AICapture: Starting timer for:", highlightTarget);
-        // Optional: Add a subtle visual cue that it's potentially going to be processed?
-        // highlightTarget.classList.add('aicapture-pending'); // Example - would need CSS
+        console.log("AICapture: Starting stabilization timer for:", highlightTarget);
     }
+
+    // ** Add the pending highlight when timer starts/resets **
+    // Ensure no other highlights are present first
+    removeAllHighlights(highlightTarget);
+    highlightTarget.classList.add('aicapture-pending');
 
     // Start a new timer
     const timerId = setTimeout(() => {
         // Timer completed without being reset, proceed to send
         stabilizationTimers.delete(highlightTarget); // Remove from timer map
-        // highlightTarget.classList.remove('aicapture-pending'); // Remove pending cue
+        // Pending highlight will be removed inside sendCodeToServer
         sendCodeToServer(highlightTarget, codeElement);
     }, STABILIZATION_DELAY_MS);
 
@@ -153,7 +158,6 @@ function scanForCodeBlocks() {
             // which will find it again and reset the timer anew.
             resetStabilizationTimer(highlightTarget, codeElement);
         } else {
-             // This shouldn't happen if CODE_BLOCK_SELECTOR requires HIGHLIGHT_TARGET_SELECTOR as an ancestor
              // console.warn("AICapture: Found code element without highlight target parent?", codeElement);
         }
     });
@@ -177,19 +181,17 @@ const observer = new MutationObserver(mutations => {
             }
         }
         // Check if text content changed within a relevant element or its children
-        // This is broad but necessary as we don't know exactly which node's text changes
         else if (mutation.type === 'characterData') {
-            const targetParent = mutation.target.parentElement?.closest(HIGHLIGHT_TARGET_SELECTOR);
+             // Check if the change happened within or is an ancestor of a potential code block
+             const targetParent = mutation.target.parentElement?.closest(HIGHLIGHT_TARGET_SELECTOR);
              if (targetParent) {
                  potentiallyRelevant = true;
              }
+             // Also consider changes directly to the code element's text node (if possible)
+             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) {
+                 potentiallyRelevant = true;
+             }
         }
-         // Check attribute changes on the target itself (less likely relevant for content change)
-         // else if (mutation.type === 'attributes') {
-         //     if (mutation.target.matches && mutation.target.matches(HIGHLIGHT_TARGET_SELECTOR)) {
-         //         potentiallyRelevant = true;
-         //     }
-         // }
 
         if (potentiallyRelevant) break;
     }

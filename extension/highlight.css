@@ -1,5 +1,4 @@
-/* @@FILENAME@@ extension/highlight.css */
-/* Style for the initial highlight when code is detected */
+/* Style for the initial highlight when code is detected (now used during send) */
 .aicapture-highlight {
   /* Use outline to avoid affecting layout, !important might be needed */
   outline: 3px solid #FFD700 !important; /* Bright yellow/gold outline */
@@ -9,10 +8,21 @@
   box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
 
   /* Smooth transition for change */
-  transition: outline 0.5s ease-in-out, background-color 0.5s ease-in-out, box-shadow 0.5s ease-in-out;
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* Style for SUCCESSFUL processing (including successful Git commit if applicable) */
+/* Style for the PENDING state (timer running) */
+.aicapture-pending {
+  outline: 1px dashed #a0a0ff !important; /* Subtle dashed blue outline */
+  outline-offset: 2px;
+  background-color: rgba(180, 180, 255, 0.08) !important; /* Very faint blue background */
+  border-radius: 4px;
+  /* Smooth transition for appearance/removal */
+  transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+}
+
+
+/* Style for SUCCESSFUL processing (persistent) */
 .aicapture-success {
   outline: 3px solid #28a745 !important; /* Green outline */
   outline-offset: 2px;
@@ -23,7 +33,7 @@
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* Style for FAILED processing (server error, syntax error, failed commit, etc.) */
+/* Style for FAILED processing (persistent) */
 .aicapture-error {
   outline: 3px solid #dc3545 !important; /* Red outline */
   outline-offset: 2px;
