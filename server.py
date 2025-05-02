@@ -75,12 +75,11 @@ if __name__ == '__main__':
         app.run(host=host_ip, port=port_num, debug=False)
     # ... (exception handling remains the same) ...
     except OSError as e:
-        if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'):
+        if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'): # Check os.name for Windows error code
              print(f"\nE: Port {port_num} is already in use.", file=sys.stderr)
-             print(f"   Stop the other process or use '-p <new_port>'", file=sys.stderr)
+             print(f"   Stop the other process or use '--port <new_port>'", file=sys.stderr) # Corrected argument suggestion
              sys.exit(1)
         else: print(f"\nE: Failed to start server: {e}", file=sys.stderr); sys.exit(1)
     except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)
     except Exception as e: print(f"\nE: Unexpected error during startup: {e}", file=sys.stderr); sys.exit(1)
 
-# @@FILENAME@@ server.py

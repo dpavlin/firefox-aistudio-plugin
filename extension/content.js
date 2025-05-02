@@ -75,17 +75,7 @@ function sendCodeToServer(highlightTarget, codeElement) {
         console.log("AICapture: Received response from background:", response);
         highlightTarget.classList.remove('aicapture-highlight'); // Remove processing highlight
 
-        // Check if the response indicates the extension was inactive
-        if (response?.details?.status === 'inactive') {
-             console.warn("AICapture: Extension is inactive. Highlight cleared.");
-             // No success/error highlight needed if inactive
-             removeAllHighlights(highlightTarget);
-             processedBlocks.delete(highlightTarget); // Allow reprocessing if activated later
-             return;
-        }
-
-
-        const success = response && response.success; // Use the top-level success boolean from background
+        const success = response && response.success; // Simplified check
         const finalClass = success ? 'aicapture-success' : 'aicapture-error';
 
         // Apply final, persistent highlight class
@@ -93,7 +83,9 @@ function sendCodeToServer(highlightTarget, codeElement) {
         if (success) {
             console.log("AICapture: Highlight success (persistent)");
         } else {
-            console.error("AICapture: Highlight error (persistent). Response:", response?.details);
+            // Log the error message received from background/server if available
+            const errorMsg = response?.details?.message || 'Unknown error';
+            console.error(`AICapture: Highlight error (persistent). Reason: ${errorMsg}`, response?.details);
         }
         // ** NO removal logic here **
 
@@ -223,6 +215,5 @@ observer.observe(document.body, {
 });
 
 // Initial scan in case content is already present
-console.log("AI Code Capture: Performing initial scan.");
+console.log("AICapture: Performing initial scan.");
 debouncedScan(); // Use the debounced version for initial scan too
-

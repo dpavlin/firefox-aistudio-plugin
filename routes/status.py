@@ -27,4 +27,3 @@ def test_connection():
     """Simple endpoint to test if the server is running, returns status."""
     print("Received /test_connection request", file=sys.stderr)
     return get_status() # Reuse the status endpoint logic
-# @@FILENAME@@ routes/status.py

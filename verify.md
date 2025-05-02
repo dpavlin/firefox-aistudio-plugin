@@ -43,33 +43,33 @@
 32. **Verify that** the server correctly generates timestamped filenames in the `received_codes/` directory during fallback scenarios using `utils.py::generate_timestamped_filepath`.
 33. **Verify that** the server (`server.py`) uses a `threading.Lock` to process `/submit_code` requests sequentially, preventing race conditions.
 34. **Verify that** Flask Blueprints (from `routes/`) are correctly imported and registered in `server.py`, and that the `logs_bp` is no longer registered.
+35. **Verify that** the server (`routes/submit.py`) strips the optional `--- END OF @@FILENAME@@ ... ---` marker line from the end of the code before saving or execution.
 
 **IV. Backend Server Execution (Optional)**
 
-35. **Verify that** Python syntax checking (`compile()`) is performed on saved `.py` files (unless it's the server script itself, identified by `THIS_SCRIPT_NAME` from `config_manager.py`).
-36. **Verify that** Shell syntax checking (`bash -n`) is performed on saved `.sh` files (`script_runner.py`).
-37. **Verify that** script execution (`script_runner.py::run_script`) only occurs if the corresponding `auto_run_python` or `auto_run_shell` flag is enabled *in the server's current runtime configuration* (`APP_CONFIG`), which is now set **only via command-line flags** (`--enable-python-run`, `--shell`).
-38. **Verify that** script execution (`script_runner.py`) **returns** stdout/stderr strings, and that these are included in the JSON response from `/submit_code` under keys like `run_stdout`, `run_stderr`, `syntax_stdout`, `syntax_stderr`.
-39. **Verify that** the `script_runner.py` functions no longer attempt to write log files to disk.
+36. **Verify that** Python syntax checking (`compile()`) is performed on saved `.py` files (unless it's the server script itself, identified by `THIS_SCRIPT_NAME` from `config_manager.py`, or the file is effectively empty after stripping markers).
+37. **Verify that** Shell syntax checking (`bash -n`) is performed on saved `.sh` files (`script_runner.py`) unless the file is effectively empty after stripping markers.
+38. **Verify that** script execution (`script_runner.py::run_script`) only occurs if the corresponding `auto_run_python` or `auto_run_shell` flag is enabled *in the server's current runtime configuration* (`APP_CONFIG`), which is now set **only via command-line flags** (`--enable-python-run`, `--shell`).
+39. **Verify that** script execution (`script_runner.py`) **returns** stdout/stderr strings, and that these are included in the JSON response from `/submit_code` under keys like `run_stdout`, `run_stderr`, `syntax_stdout`, `syntax_stderr`.
+40. **Verify that** the `script_runner.py` functions no longer attempt to write log files to disk.
 
 **V. Popup UI & Configuration**
 
-40. **Verify that** when the popup (`extension/popup.html`) is opened, it fetches and displays the server port number specifically associated with the *current active tab* from storage, defaulting to the correct default port (e.g., 5000) if none is stored for that tab.
-41. **Verify that** the popup (`extension/popup.html`) fetches and displays the current *global* activation state correctly.
-42. **Verify that** changing the port number in the popup input field triggers a message from `extension/popup.js` to `extension/background.js` to store the new port *for the current tab*.
-43. **Verify that** clicking "Test Connection" in the popup sends the request to the port number *currently visible* in the popup's input field.
-44. **Verify that** after a successful "Test Connection", the popup displays the server's CWD, Save Dir, Git status, and the *read-only* status of Python/Shell auto-run based on the server's command-line flags.
-45. **Verify that** the popup (`extension/popup.html`) **no longer contains** interactive toggles for controlling Python/Shell auto-run.
-46. **Verify that** toggling the activation switch in the popup updates the *global* activation state via `extension/background.js`.
-47. **Verify that** the popup (`extension/popup.html`) status message correctly reflects connection status, success/failure of operations, and indicates that port changes require a server restart.
+41. **Verify that** when the popup (`extension/popup.html`) is opened, it fetches and displays the server port number specifically associated with the *current active tab* from storage, defaulting to the correct default port (e.g., 5000) if none is stored for that tab.
+42. **Verify that** the popup (`extension/popup.html`) fetches and displays the current *global* activation state correctly.
+43. **Verify that** changing the port number in the popup input field triggers a message from `extension/popup.js` to `extension/background.js` to store the new port *for the current tab*.
+44. **Verify that** clicking "Test Connection" in the popup sends the request to the port number *currently visible* in the popup's input field.
+45. **Verify that** after a successful "Test Connection", the popup displays the server's CWD, Save Dir, Git status, and the *read-only* status of Python/Shell auto-run based on the server's command-line flags.
+46. **Verify that** the popup (`extension/popup.html`) **no longer contains** interactive toggles for controlling Python/Shell auto-run.
+47. **Verify that** toggling the activation switch in the popup updates the *global* activation state via `extension/background.js`.
+48. **Verify that** the popup (`extension/popup.html`) status message correctly reflects connection status, success/failure of operations, and indicates that port changes require a server restart.
 
 **VI. Server Setup & Configuration**
 
-48. **Verify that** the `server.py` script starts without basic Python syntax errors.
-49. **Verify that** the server (`config_manager.py`) loads only the 'port' setting from `server_config.json` if present.
-50. **Verify that** command-line arguments (`--port`, `--shell`, `--enable-python-run`) correctly set the runtime configuration for port and auto-run modes, overriding any file config for port.
-51. **Verify that** the `/update_config` endpoint (`routes/config_routes.py`) now only accepts and saves the 'port' setting to `server_config.json`.
-52. **Verify that** the server startup message in `server.py` accurately reflects the *effective running settings*, noting that auto-run is controlled by flags, and no longer mentions a log directory.
-53. **Verify that** the `logs/` directory is no longer automatically created by `config_manager.py`.
+49. **Verify that** the `server.py` script starts without basic Python syntax errors.
+50. **Verify that** the server (`config_manager.py`) loads only the 'port' setting from `server_config.json` if present.
+51. **Verify that** command-line arguments (`--port`, `--shell`, `--enable-python-run`) correctly set the runtime configuration for port and auto-run modes, overriding any file config for port.
+52. **Verify that** the `/update_config` endpoint (`routes/config_routes.py`) now only accepts and saves the 'port' setting to `server_config.json`.
+53. **Verify that** the server startup message in `server.py` accurately reflects the *effective running settings*, noting that auto-run is controlled by flags, and no longer mentions a log directory.
+54. **Verify that** the `logs/` directory is no longer automatically created by `config_manager.py`.
 
---- END OF @@FILENAME@@ verify.md ---

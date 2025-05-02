@@ -1,4 +1,4 @@
-/* @@FILENAME@@ extension/highlight.css */
+@@FILENAME@@ extension/highlight.css
 /* Style for the initial highlight when code is detected (now used during send) */
 .aicapture-highlight {
   /* Use outline to avoid affecting layout, !important might be needed */

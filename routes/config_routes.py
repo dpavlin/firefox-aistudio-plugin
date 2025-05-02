@@ -62,4 +62,3 @@ def update_config():
     else:
         # Load current config if no valid changes were requested
         return jsonify({ 'status': 'info', 'message': 'No valid config changes requested.', 'current_config_file': load_config_func() }) # Changed status to info
-# @@FILENAME@@ routes/config_routes.py

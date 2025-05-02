@@ -61,10 +61,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (shRun) serverShRunStatus.classList.add('status-false'); // Use red style for dangerous enabled shell
 
         // REMOVED logic updating toggle controls
-        // serverEnablePython.checked = details.auto_run_python || false;
-        // serverEnableShell.checked = details.auto_run_shell || false;
-        // serverEnablePython.disabled = false;
-        // serverEnableShell.disabled = false;
     }
 
      // --- Helper to get current tab ID ---
@@ -85,7 +81,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- Initialization ---
     displayStatus('Loading settings...');
     currentTabId = await getCurrentTabId();
-    // ... (rest of initialization for port and activation state remains the same) ...
     if (currentTabId === null) {
          displayStatus('Error: Could not identify the current tab. Port settings might not work correctly.', 'error');
     } else {
@@ -95,13 +90,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             const initialPort = portResponse?.port || DEFAULT_PORT;
             serverPortInput.value = initialPort;
             console.log(`Popup: Initial port for tab ${currentTabId} set to ${initialPort}`);
-        } catch (error) { /* ... error handling ... */ }
+        } catch (error) {
+            console.error(`Popup: Error getting initial port for tab ${currentTabId}:`, error);
+            serverPortInput.value = DEFAULT_PORT; // Fallback
+            displayStatus(`Error loading port for this tab: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
+        }
     }
      try {
          const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
          activationToggle.checked = activationResponse?.isActive === true;
          console.log(`Popup: Initial global activation state: ${activationToggle.checked}`);
-     } catch (error) { /* ... error handling ... */ }
+     } catch (error) {
+        console.error("Popup: Error getting initial activation state:", error);
+        activationToggle.checked = false; // Default to inactive on error
+        displayStatus(`Error loading activation state: ${error.message}.`, 'warning');
+     }
 
      if (currentTabId !== null) { testConnectionBtn.click(); }
      else { displayStatus("Cannot perform initial connection test without Tab ID.", "warning"); }
@@ -109,22 +112,95 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Event Listeners ---
 
-    // Port input listener remains the same
+    // Validate and Store Port on Input
     serverPortInput.addEventListener('input', () => {
-        // ... validation and storePort message sending ...
+        if (currentTabId === null) {
+            displayStatus('Cannot save port setting - current tab ID unknown.', 'error');
+            return;
+        }
+        const portValue = serverPortInput.value.trim();
+        const portNumber = parseInt(portValue, 10);
+        let isValid = false;
+
+        if (portValue === '' || (!isNaN(portNumber) && portNumber >= 1025 && portNumber <= 65535)) {
+            serverPortInput.classList.remove('invalid');
+            isValid = true;
+            if (portValue !== '') {
+                 // **Send tabId with the store request**
+                 browser.runtime.sendMessage({ action: "storePort", tabId: currentTabId, port: portNumber })
+                     .then(response => {
+                         if (!response?.success) console.error(`Popup: Failed to store port for tab ${currentTabId}.`);
+                         else console.log(`Popup: Port ${portNumber} for tab ${currentTabId} sent to background.`);
+                     })
+                     .catch(err => console.error("Popup: Error sending storePort message:", err));
+            }
+        } else {
+            serverPortInput.classList.add('invalid');
+        }
+        // Show restart warning if port differs from default (simplistic check)
+        // Consider checking against the *actual* default fetched initially if needed
+        restartWarning.style.display = (portValue !== '' && portNumber !== DEFAULT_PORT) ? 'block' : 'none';
     });
 
-    // Test Connection listener remains the same
+    // Test Connection Button
     testConnectionBtn.addEventListener('click', async () => {
-        // ... reads input, sends testConnection message, calls updateServerInfoDisplay ...
+        // Tests the *currently entered* port, not necessarily the stored one for the tab
+        const currentInputPort = parseInt(serverPortInput.value, 10);
+        if (isNaN(currentInputPort) || currentInputPort < 1025 || currentInputPort > 65535) {
+            displayStatus('Invalid port number in field. Enter 1025-65535.', 'error');
+            serverPortInput.classList.add('invalid');
+            return;
+        }
+        serverPortInput.classList.remove('invalid');
+
+        displayStatus(`Testing connection to port ${currentInputPort}...`, 'info');
+        testConnectionBtn.disabled = true;
+
+        try {
+            // Send the current input value to the background script for testing
+            const response = await browser.runtime.sendMessage({ action: "testConnection", port: currentInputPort });
+
+            if (response && response.success) {
+                displayStatus('Connection successful! Server status loaded.', 'success');
+                updateServerInfoDisplay(response.details);
+                 // Update the input field ONLY if the server reports a DIFFERENT port than tested
+                 // This indicates the user might be testing one port while the server for *this tab* runs elsewhere
+                const serverReportedPort = response.details.port;
+                 if (serverReportedPort && serverReportedPort !== currentInputPort) {
+                     // serverPortInput.value = serverReportedPort; // Decide if you want this behavior
+                     console.warn(`Popup: Test connection to ${currentInputPort} successful, but server reported running on ${serverReportedPort}.`);
+                 } else {
+                     console.log(`Popup: Test connection OK to port ${currentInputPort}. Server details:`, response.details);
+                 }
+            } else {
+                 let errorMsg = response?.details?.message || `Connection failed to port ${currentInputPort}. Is a server running there?`;
+                 displayStatus(errorMsg, 'error');
+                 updateServerInfoDisplay({}); // Clear fields on failure
+                 console.error(`Popup: Test connection to ${currentInputPort} failed:`, response?.details);
+            }
+        } catch (error) {
+            displayStatus(`Error testing connection: ${error.message}`, 'error');
+            updateServerInfoDisplay({});
+            console.error("Popup: Error sending testConnection message:", error);
+        } finally {
+            testConnectionBtn.disabled = false;
+        }
     });
 
     // Activation Toggle listener remains the same
     activationToggle.addEventListener('change', () => {
-        // ... sends storeActivationState message ...
+        const isActive = activationToggle.checked;
+        browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
+            .then(response => {
+                if (!response?.success) console.error("Popup: Failed to store activation state.");
+                else console.log(`Popup: Global activation state stored: ${isActive}`);
+            })
+            .catch(err => console.error("Popup: Error sending storeActivationState message:", err));
+            displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
     });
 
     // REMOVED Event listeners for server config toggles
+    // async function handleConfigToggleChange(settingKey, isEnabled) { ... }
     // serverEnablePython.addEventListener(...)
     // serverEnableShell.addEventListener(...)
 
