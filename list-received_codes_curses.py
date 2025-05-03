@@ -116,12 +116,8 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
 
         if key == curses.KEY_RESIZE:
              needs_redraw = True
-             # Adjust list height immediately on resize
              list_h = h - 2
-             # Recalculate top_row if current selection goes off screen
-             if current_row_idx >= top_row_idx + list_h:
-                 top_row_idx = current_row_idx - list_h + 1
-             key = 0 # Reset key
+             key = 0
 
         # Scroll list if necessary
         if list_h > 0:
@@ -129,12 +125,7 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
             elif current_row_idx >= top_row_idx + list_h: # Needs adjustment if previews change visible count
                  # Simple scroll calculation based on index (may jump over previews)
                  top_row_idx = current_row_idx - list_h + 1
-        else: top_row_idx = current_row_idx # Ensure top row matches current if no space
-
-        # Clamp top_row_idx to valid range
-        max_top_row = max(0, len(files_with_paths) - list_h)
-        top_row_idx = max(0, min(top_row_idx, max_top_row))
-
+        else: top_row_idx = current_row_idx
 
         scrolled = (top_row_idx != prev_top_row_idx)
         moved = (current_row_idx != prev_current_row_idx)
@@ -146,28 +137,22 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
             # Draw Header & Footer
             try:
                 if w < fixed_total_width + min_filename_width or list_h <= 0:
-                    msg = "Terminal too narrow!"
-                    stdscr.addstr(0, 0, msg.center(min(w, len(msg))))
+                    stdscr.addstr(0, 0, "Terminal too narrow!".center(w-1))
                 else:
                     header_text = f"{'#':<{num_col_width-1}}{col_spacer}{'Filename':<{available_filename_width}}{col_spacer}{'Size':>{size_col_width}}{col_spacer}{'Modified':>{time_col_width}}"
                     stdscr.attron(header_attr); stdscr.addstr(0, 0, header_text[:w-1]); stdscr.attroff(header_attr)
-
                 footer_text = "Enter=View, q/ESC=Quit, Arrows/PgUp/Dn/g/G=Navigate"[:w-1]
-                # Ensure footer doesn't overwrite content if h=1
-                if h > 1: stdscr.addstr(h-1, 0, footer_text)
-            except curses.error: pass # Ignore errors drawing header/footer if screen too small
+                stdscr.addstr(h-1, 0, footer_text)
+            except curses.error: pass
 
             # Draw List Area
             screen_row = 1 # Start drawing below header
             if list_h > 0:
-                # Iterate through the files that should be visible
-                for list_idx in range(top_row_idx, min(len(files_with_paths), top_row_idx + list_h + 10)): # Look ahead slightly for preview calc? Might be complex. Just use list_h for now.
-                # for list_idx in range(top_row_idx, len(files_with_paths)):
+                for list_idx in range(top_row_idx, len(files_with_paths)):
                     if screen_row >= h - 1: break # Stop if we run out of screen lines
 
                     file_path = files_with_paths[list_idx]
                     preview_content = None
-                    has_preview = False
                     try:
                         stat_info = file_path.stat()
                         size_bytes = stat_info.st_size
@@ -176,13 +161,9 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
                         # Check if preview should be loaded
                         if 0 < size_bytes < PREVIEW_SIZE_LIMIT:
                             try:
-                                preview_bytes = file_path.read_bytes()
-                                # Decode safely, replacing errors
-                                preview_content = preview_bytes.decode('utf-8', errors='replace')
-                                has_preview = True
+                                preview_content = file_path.read_text(encoding='utf-8', errors='replace')
                             except Exception as read_err:
                                 preview_content = f"[Read Error: {read_err}]"
-                                has_preview = True # Treat error as a form of preview
                     except OSError:
                         size_str = "Error".rjust(size_col_width)
                         mtime_str = "Error".rjust(time_col_width)
@@ -205,7 +186,7 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
                     screen_row += 1 # Move to next screen line
 
                     # Draw preview line if applicable and space allows
-                    if has_preview and screen_row < h - 1:
+                    if preview_content and screen_row < h - 1:
                          formatted_preview = format_preview_content(preview_content)
                          preview_display = f"{preview_indent}{formatted_preview}"
                          try:
@@ -220,55 +201,32 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
             stdscr.refresh()
 
         # --- Get and Process Input ---
-        try:
-             key = stdscr.getch() # Blocking call
-        except KeyboardInterrupt: # Handle Ctrl+C gracefully
-             return None, current_row_idx
-        except Exception: # Catch other potential getch errors
-             return None, current_row_idx
-
-        page_amount = max(1, list_h -1) # Scroll roughly a page height
+        key = stdscr.getch()
 
         if key == curses.KEY_UP: current_row_idx = max(0, current_row_idx - 1)
         elif key == curses.KEY_DOWN: current_row_idx = min(len(files_with_paths) - 1, current_row_idx + 1)
-        elif key == curses.KEY_PPAGE: current_row_idx = max(0, current_row_idx - page_amount); top_row_idx = max(0, top_row_idx - page_amount)
-        elif key == curses.KEY_NPAGE: current_row_idx = min(len(files_with_paths) - 1, current_row_idx + page_amount); top_row_idx = min(max(0, len(files_with_paths) - list_h), top_row_idx + page_amount)
-        elif key == ord('g') or key == curses.KEY_HOME: current_row_idx = 0; top_row_idx = 0
-        elif key == ord('G') or key == curses.KEY_END: current_row_idx = len(files_with_paths) - 1; top_row_idx = max(0, len(files_with_paths) - list_h)
-        elif key == ord('q') or key == 27: return None, current_row_idx # ESC key
+        elif key == curses.KEY_PPAGE: current_row_idx = max(0, current_row_idx - list_h); top_row_idx = max(0, top_row_idx - list_h) # Simple page scroll
+        elif key == curses.KEY_NPAGE: current_row_idx = min(len(files_with_paths) - 1, current_row_idx + list_h); top_row_idx = min(max(0, len(files_with_paths) - list_h), top_row_idx + list_h) # Simple page scroll
+        elif key == ord('g') or key == curses.KEY_HOME: current_row_idx = 0
+        elif key == ord('G') or key == curses.KEY_END: current_row_idx = len(files_with_paths) - 1
+        elif key == ord('q') or key == 27: return None, current_row_idx
         elif key == curses.KEY_ENTER or key == 10 or key == 13:
             if 0 <= current_row_idx < len(files_with_paths):
                  selected_path = files_with_paths[current_row_idx].resolve()
                  return selected_path, current_row_idx
-            else: # Should not happen if list isn't empty
-                 return None, current_row_idx
         elif key == curses.KEY_RESIZE:
              needs_redraw = True
-             # Let loop handle redraw on next iteration
-
+             # No continue needed, just let loop redraw
 
 def view_file(filepath: Path):
     """Attempts to view the specified file using less."""
-    if not shutil.which("less"):
-        print(f"\nError: 'less' command not found. Cannot view: {filepath}", file=sys.stderr)
-        input("Press Enter to continue...")
-        return
-    if not filepath.is_file():
-        print(f"\nError: Not a file: {filepath}", file=sys.stderr)
-        input("Press Enter to continue...")
-        return
-
+    # (No changes needed in view_file)
+    if not shutil.which("less"): print(f"\nError: 'less' not found: {filepath}", file=sys.stderr); input("Press Enter..."); return
+    if not filepath.is_file(): print(f"\nError: Not a file: {filepath}", file=sys.stderr); input("Press Enter..."); return
     print(f"\nViewing '{filepath.name}' with less... (Press 'q' to quit less)", file=sys.stderr)
-    try:
-        # Run less, allow user interaction
-        subprocess.run(["less", str(filepath)], check=False)
-    except Exception as e:
-        print(f"\nError running 'less': {e}", file=sys.stderr)
-        input("Press Enter to continue...")
-    finally:
-        # No specific cleanup needed here, terminal state handled by curses wrapper exit
-        pass
-    print("\nReturned from less.", file=sys.stderr) # Indicate return to script
+    try: subprocess.run(["less", str(filepath)], check=False)
+    except Exception as e: print(f"\nError running 'less': {e}", file=sys.stderr); input("Press Enter...")
+    finally: pass
 
 # --- Main Execution ---
 def main():
@@ -286,74 +244,37 @@ def main():
     check_dependencies()
 
     if not codes_dir.is_dir():
-        print(f"Error: Directory does not exist: {codes_dir}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Error: Directory does not exist: {codes_dir}", file=sys.stderr); sys.exit(1)
 
     last_selection_index = 0
     while True:
         files = get_files_list(codes_dir)
         if not files and not codes_dir.exists():
              print(f"Error: Directory '{codes_dir}' disappeared.", file=sys.stderr); break
-        elif not files:
-             print(f"Directory '{codes_dir}' is empty. Waiting... (Ctrl+C to exit)")
-             try:
-                 # Wait for a bit before re-scanning, or handle differently
-                 # For now, just exit if empty on startup
-                 input("Press Enter to re-scan or Ctrl+C to exit...")
-                 continue # Rescan immediately
-             except KeyboardInterrupt:
-                 break
 
         selected_path = None
-        # Use a variable to store the result outside the try/except for viewing
-        curses_result = None
         try:
-            # Run the curses application within the wrapper
-            curses_result = curses.wrapper(
+            selected_path, last_selection_index = curses.wrapper(
                 curses_selector, files, last_selection_index
             )
-            # If wrapper finishes successfully, unpack the result
-            if curses_result:
-                selected_path, last_selection_index = curses_result
-            else: # Should not happen unless wrapper fails internally before returning
-                break
-
         except curses.error as e:
-             # Curses errors often happen on exit or resize, try to clean up terminal
-             curses.endwin()
-             print(f"\nCurses error: {e}\nTerminal might be too small or incompatible.", file=sys.stderr)
-             break
+             print(f"\nCurses error: {e}\nTerminal might be too small or incompatible.", file=sys.stderr); break
         except Exception as e:
-             # Catch other potential errors during wrapper execution
-             curses.endwin() # Try to restore terminal
-             print(f"\nError in selector loop: {e}", file=sys.stderr)
-             traceback.print_exc(file=sys.stderr) # Print traceback for debugging
-             break
+             print(f"\nError in selector loop: {e}", file=sys.stderr); break
 
         if selected_path is None:
-            # User quit the selector (q/ESC)
-            print("\nExiting viewer.")
+            print("\nExiting.")
             break
         else:
-            # User selected a file, view it
             view_file(selected_path)
-            # Loop will continue after viewing, re-listing files
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user (Ctrl+C).")
-    except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr) # Print traceback for debugging
+    try: main()
+    except KeyboardInterrupt: print("\nOperation cancelled by user (Ctrl+C).")
+    except Exception as e: print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
     finally:
-        # Ensure curses is ended cleanly, even if errors occurred outside wrapper
         try:
-             if sys.stdout.isatty() and curses.isendwin() is False:
-                 curses.endwin()
-        except Exception:
-            pass
-        print("Exiting.")
+             if sys.stdout.isatty(): curses.endwin()
+        except Exception: pass
         sys.exit(0)

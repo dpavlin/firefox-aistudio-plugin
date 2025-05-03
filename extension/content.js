@@ -1,4 +1,4 @@
-// Debounce function (remains the same)
+// Debounce function (assuming it exists)
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -105,13 +105,10 @@ function displayOutputNearBlock(targetElement, outputData) {
     if (hasSyntaxOutput) {
         outputHTML += `<strong class="output-label">Syntax Check:</strong>`;
         if (outputData.syntax_stdout?.trim()) {
-            // Escape HTML characters in output to prevent injection issues
-            const escapedStdout = outputData.syntax_stdout.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            outputHTML += `<pre class="aicapture-stdout">${escapedStdout}</pre>`;
+            outputHTML += `<pre class="aicapture-stdout">${escapeHtml(outputData.syntax_stdout)}</pre>`; // Escape output
         }
         if (outputData.syntax_stderr?.trim()) {
-             const escapedStderr = outputData.syntax_stderr.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            outputHTML += `<pre class="aicapture-stderr">${escapedStderr}</pre>`;
+            outputHTML += `<pre class="aicapture-stderr">${escapeHtml(outputData.syntax_stderr)}</pre>`; // Escape output
         }
     }
 
@@ -119,12 +116,10 @@ function displayOutputNearBlock(targetElement, outputData) {
     if (hasRunOutput) {
         outputHTML += `<strong class="output-label">Execution Run:</strong>`;
          if (outputData.run_stdout?.trim()) {
-             const escapedStdout = outputData.run_stdout.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            outputHTML += `<pre class="aicapture-stdout">${escapedStdout}</pre>`;
+            outputHTML += `<pre class="aicapture-stdout">${escapeHtml(outputData.run_stdout)}</pre>`; // Escape output
         }
         if (outputData.run_stderr?.trim()) {
-             const escapedStderr = outputData.run_stderr.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            outputHTML += `<pre class="aicapture-stderr">${escapedStderr}</pre>`;
+            outputHTML += `<pre class="aicapture-stderr">${escapeHtml(outputData.run_stderr)}</pre>`; // Escape output
         }
     }
 
@@ -134,6 +129,17 @@ function displayOutputNearBlock(targetElement, outputData) {
     targetElement.insertAdjacentElement('afterend', outputContainer);
     console.log("AICapture: Injected execution output after block:", targetElement);
 }
+
+// Helper to escape HTML entities in output
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+ }
 
 
 // Function called ONLY when stabilization timer completes - NOW calls displayOutputNearBlock
@@ -147,13 +153,6 @@ async function sendCodeToServer(highlightTarget, codeElement, blockHash) {
         } else if (highlightTarget && currentStatus) {
              removeAllHighlights(highlightTarget);
              highlightTarget.classList.add(currentStatus === 'sent' ? 'aicapture-success' : 'aicapture-error');
-             // Attempt to re-display output if status is final but output missing
-             // This might happen if the page was re-rendered somehow
-            const existingOutput = highlightTarget.nextElementSibling;
-            if (!existingOutput || !existingOutput.classList.contains(OUTPUT_CONTAINER_CLASS)) {
-                // Maybe re-fetch output? For simplicity, just log for now.
-                console.log(`AICapture: Final status for ${blockHash} detected, but output element missing.`);
-            }
         }
         return;
     }
@@ -224,14 +223,6 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
             clearTimeout(stabilizationTimers.get(blockHash));
             stabilizationTimers.delete(blockHash);
          }
-         // Also try to re-display output if it's missing (e.g., after page mutation/reload)
-        const existingOutput = highlightTarget.nextElementSibling;
-        if (!existingOutput || !existingOutput.classList.contains(OUTPUT_CONTAINER_CLASS)) {
-            // Fetch and display output associated with this *finalized* block
-            // Need background function to get output by hash/tab - add if needed
-            // For now, just log
-             console.log(`AICapture: Re-applying final status for ${blockHash}, output element missing.`);
-        }
         return; // Stop processing if already finalized
     }
 
@@ -299,19 +290,17 @@ const observer = new MutationObserver(mutations => {
         // Check text content changes
         else if (mutation.type === 'characterData') {
              const targetParent = mutation.target.parentElement?.closest(HIGHLIGHT_TARGET_SELECTOR);
-             if (targetParent) { potentiallyRelevant = true; }
-             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) { potentiallyRelevant = true; }
+             if (targetParent) potentiallyRelevant = true;
+             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) potentiallyRelevant = true;
         }
         if (potentiallyRelevant) break;
     }
     if (potentiallyRelevant) { debouncedScan(); }
 });
 
+
 // --- Initialization ---
 console.log("AICapture: Starting observer...");
 observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 console.log("AICapture: Performing initial scan.");
 debouncedScan();
-
-// Add basic HTML escaping to injected output
-// @@FILENAME@@ extension/content.js
