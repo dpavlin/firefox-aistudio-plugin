@@ -5,7 +5,7 @@ import sys
 import threading
 from flask import Flask
 from flask_cors import CORS
-import os # Import os for path manipulation if needed later
+import os # Used for exception check
 
 # Import configuration and route blueprints
 import config_manager
@@ -73,12 +73,28 @@ if __name__ == '__main__':
     print("--- Server ready ---", file=sys.stderr)
 
     try:
+        # Disable Flask's default startup messages if possible, or just live with them
         app.run(host=host_ip, port=port_num, debug=False)
     except OSError as e:
-        if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'):
-             print(f"\nE: Port {port_num} is already in use.", file=sys.stderr)
-             print(f"   Stop the other process or use '-p <new_port>'", file=sys.stderr)
+        # Handle specific port-in-use error across platforms
+        if ("Address already in use" in str(e) or # Linux/macOS
+            "make_sock: could not bind to address" in str(e) or # Some macOS/BSD variants
+            (hasattr(e, 'winerror') and e.winerror == 10048) or # Windows specific code
+            (hasattr(e, 'errno') and e.errno == 98)): # General POSIX EADDRINUSE
+            print(f"\nE: Port {port_num} is already in use.", file=sys.stderr)
+            print(f"   Check if another service (or previous instance) is running on this port.", file=sys.stderr)
+            print(f"   You can stop the other process or use the '--port <new_port>' argument.", file=sys.stderr)
+            sys.exit(1)
+        else:
+            # Handle other OS errors during startup
+             print(f"\nE: Failed to start server due to OS Error: {e}", file=sys.stderr)
              sys.exit(1)
-        else: print(f"\nE: Failed to start server: {e}", file=sys.stderr); sys.exit(1)
-    except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)
-    except Exception as e: print(f"\nE: Unexpected error during startup: {e}", file=sys.stderr); sys.exit(1)
+    except KeyboardInterrupt:
+         print("\n--- Server shutting down (Ctrl+C pressed) ---", file=sys.stderr)
+         sys.exit(0)
+    except Exception as e:
+         # Catch any other unexpected errors during startup
+         print(f"\nE: Unexpected error during server startup: {e}", file=sys.stderr)
+         traceback.print_exc(file=sys.stderr) # Print full traceback for debugging
+         sys.exit(1)
+

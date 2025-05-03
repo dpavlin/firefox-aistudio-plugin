@@ -69,88 +69,95 @@ def submit_code_route():
         match = FILENAME_EXTRACT_REGEX.search(received_code) # Uses greedy regex from utils.py
 
         if match:
+            # Marker is guaranteed to be effectively on line 1 due to regex anchor ^
             marker_found_and_valid = True
             extracted_filename_raw = match.group(1).strip()
             print(f"Info: Found marker on first line: '{extracted_filename_raw}'.", file=sys.stderr)
 
+            # Find the first newline character to split off the marker line
             first_newline = received_code.find('\n')
             if first_newline != -1:
-                code_to_save = received_code[first_newline + 1:]
+                code_to_save = received_code[first_newline + 1:] # Content starts after the newline
             else:
-                code_to_save = ""
+                code_to_save = "" # Marker was the only content
 
             print(f"Info: Stripped marker line. Code to save length: {len(code_to_save)}", file=sys.stderr)
             sanitized_path_from_marker = sanitize_filename(extracted_filename_raw)
             if not sanitized_path_from_marker:
                 print(f"W: Filename sanitization failed for '{extracted_filename_raw}'. Reverting to fallback.", file=sys.stderr)
-                marker_found_and_valid = False
-                code_to_save = received_code
+                marker_found_and_valid = False # Treat as invalid if sanitization fails
+                code_to_save = received_code # Revert to original (BOM-stripped) code
                 extracted_filename_raw = None
         else:
             print("Info: No valid @@FILENAME@@ marker found at the start.", file=sys.stderr)
             marker_found_and_valid = False
-
+            # code_to_save remains original (BOM-stripped)
 
         # --- Determine Save Path (Git or Fallback) ---
-        if marker_found_and_valid:
-            save_target = "try_git_or_named_fallback"
+        if marker_found_and_valid: # Use marker info ONLY if found and sanitized
+            save_target = "try_git_or_named_fallback" # Tentative target
             if config['IS_REPO']:
                 git_path_to_check = sanitized_path_from_marker
                 if '/' not in sanitized_path_from_marker.replace('\\', '/'):
                     found_rel_path = find_tracked_file_by_name(sanitized_path_from_marker, config['SERVER_DIR'], config['IS_REPO'])
                     if found_rel_path:
                         git_path_to_check = found_rel_path
+                    else:
+                        # If basename search fails, still proceed with checking the sanitized_path_from_marker itself
+                        pass # print(f"Info: Basename '{sanitized_path_from_marker}' not found uniquely in Git or search failed. Checking relative path.", file=sys.stderr)
+
 
                 potential_target_abs = (config['SERVER_DIR'] / git_path_to_check).resolve()
 
                 if str(potential_target_abs).startswith(str(config['SERVER_DIR'])):
                     is_tracked = is_git_tracked(git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                     if is_tracked:
+                        # print(f"Info: Target path '{git_path_to_check}' is tracked. Setting target to 'git'.", file=sys.stderr)
                         absolute_path_target = potential_target_abs
                         save_target = "git"
                         final_save_filename = git_path_to_check
                     else:
+                        # print(f"Info: Target path '{git_path_to_check}' exists but is not tracked by Git. Setting target to 'fallback_named'.", file=sys.stderr)
                         absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
                         save_target = "fallback_named"
                 else:
-                    save_target = "fallback"
+                    print(f"W: Potential target path '{potential_target_abs}' is outside SERVER_DIR. Reverting to fallback.", file=sys.stderr)
+                    save_target = "fallback" # Revert to standard timestamped fallback
             else: # Not a Git repo
                  absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
                  if str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
+                    #   print(f"Info: Not a git repo. Setting target to 'fallback_named': '{sanitized_path_from_marker}'", file=sys.stderr)
                       save_target = "fallback_named"
                  else:
+                      print(f"W: Potential target path '{absolute_path_target}' is outside SAVE_FOLDER. Reverting to fallback.", file=sys.stderr)
                       save_target = "fallback"
         else:
+            # Explicitly ensure fallback if marker wasn't found or was invalid
             save_target = "fallback"
 
-        # --- Strip Optional End Marker before Saving ---
-        original_code_to_save = code_to_save # Keep a copy
-        lines = code_to_save.splitlines()
-        # Use a safe check for empty lines list
-        if lines:
-            last_line_index = -1
-            for i in range(len(lines) - 1, -1, -1):
-                 if lines[i].strip():
-                     last_line_index = i
-                     break
 
-            if last_line_index != -1:
-                # Use regex for a more robust check of the end marker format
-                if END_MARKER_REGEX.match(lines[last_line_index]):
-                     print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
-                     # Reconstruct code excluding the marker line and potential empty lines after it
-                     code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
-                     # Add back a single trailing newline if the result is not empty
-                     if code_to_save:
-                         code_to_save += "\n"
-                else:
-                     # Ensure code ends with a single newline if it wasn't the marker
-                     code_to_save = code_to_save.rstrip() + "\n"
-            # Handle case where code_to_save might have become empty after stripping marker
-            elif not code_to_save.strip():
-                code_to_save = "" # Ensure truly empty if only whitespace remained
-        else:
-             code_to_save = "" # Ensure empty if it started empty
+        # --- Strip Optional End Marker before Saving ---
+        original_code_to_save = code_to_save # Keep a copy for fallback naming if needed
+        lines = code_to_save.splitlines()
+        last_line_index = -1
+        # Find the last non-empty line index
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip():
+                last_line_index = i
+                break
+
+        # Check if the last non-empty line matches the end marker pattern
+        if last_line_index != -1 and END_MARKER_REGEX.match(lines[last_line_index]):
+             print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
+             # Reconstruct code excluding the marker line and potential empty lines after it
+             code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
+             # Add back a single trailing newline if the result is not empty
+             if code_to_save:
+                 code_to_save += "\n"
+        elif code_to_save: # If not the marker and not empty, ensure single trailing newline
+             code_to_save = code_to_save.rstrip() + "\n"
+        # If code_to_save was empty initially, it remains empty
+
 
         # --- Handle Saving ---
         if save_target == "git":
@@ -164,8 +171,8 @@ def submit_code_route():
                 return jsonify({'status': 'error', 'message': f'Git commit failed for {git_path_to_check}.'}), 500
 
         elif save_target == "fallback_named":
-            if not absolute_path_target or not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
-                 print(f"E: Internal error - fallback_named path '{absolute_path_target}' invalid or outside save folder '{config['SAVE_FOLDER_PATH']}'.", file=sys.stderr)
+            if not str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
+                 print(f"E: Internal error - fallback_named path '{absolute_path_target}' outside save folder '{config['SAVE_FOLDER_PATH']}'.", file=sys.stderr)
                  return jsonify({'status': 'error', 'message': 'Internal error constructing fallback path.'}), 500
 
             if save_code_to_file(code_to_save, absolute_path_target):
@@ -181,6 +188,7 @@ def submit_code_route():
             # Use the language from the *original* code_to_save (before end marker strip)
             ext_for_fallback, detected_language_name = detect_language_and_extension(original_code_to_save)
             base_name = "code"
+            # Use sanitized filename part for prefix only if marker was valid originally
             if marker_found_and_valid and sanitized_path_from_marker:
                  base_name = Path(sanitized_path_from_marker).stem
             elif detected_language_name not in ["Unknown", "Text"]:
@@ -207,7 +215,7 @@ def submit_code_route():
              return jsonify({'status': 'error', 'message': 'Internal error: Saved file path invalid.'}), 500
 
         check_run_filepath = save_filepath_str
-        display_filename = final_save_filename
+        display_filename = final_save_filename # This should always be set now
         file_extension = Path(display_filename).suffix.lower()
 
         # Determine relative path for logging
@@ -215,6 +223,7 @@ def submit_code_route():
             check_run_filepath_rel = Path(check_run_filepath).relative_to(config['SERVER_DIR']).as_posix()
         except ValueError:
             check_run_filepath_rel = Path(check_run_filepath).name
+        # Print path type
         print(f"Info: Checking/Running {'Git' if save_target == 'git' else 'Fallback'} file: {check_run_filepath_rel}", file=sys.stderr)
 
 
@@ -223,16 +232,19 @@ def submit_code_route():
             is_server_script = Path(check_run_filepath).resolve() == (config['SERVER_DIR'] / config['THIS_SCRIPT_NAME']).resolve()
             if not is_server_script:
                 try:
+                    # Read the *saved* (potentially stripped) code for syntax check
                     saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
                     compile(saved_code_content, check_run_filepath, 'exec')
                     syntax_ok = True
+                    # No separate syntax output for Python compile
                     if config['auto_run_python']:
                         print(f"Attempting auto-run for Python script: {check_run_filepath}", file=sys.stderr)
+                        # Capture output from run_script
                         run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'python')
                 except SyntaxError as py_syntax_e:
                     print(f"E: Python syntax error in '{check_run_filepath_rel}': {py_syntax_e}", file=sys.stderr)
                     syntax_ok = False; run_success = False
-                    syntax_stderr = str(py_syntax_e)
+                    syntax_stderr = str(py_syntax_e) # Capture syntax error message
                 except Exception as py_compile_e:
                     print(f"E: Error compiling Python script '{check_run_filepath_rel}': {py_compile_e}", file=sys.stderr)
                     syntax_ok = False; run_success = False
@@ -243,18 +255,20 @@ def submit_code_route():
         elif file_extension == '.sh':
              script_type = 'shell'
              print(f"Attempting syntax check for Shell script: {check_run_filepath}", file=sys.stderr)
+             # Capture output from check_shell_syntax
              syntax_ok, syntax_stdout, syntax_stderr = check_shell_syntax(check_run_filepath)
              if syntax_ok:
                   if config['auto_run_shell']:
                        print(f"Attempting auto-run for Shell script: {check_run_filepath}", file=sys.stderr)
+                       # Capture output from run_script
                        run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'shell')
-             else: run_success = False
+             else: run_success = False # Syntax failed, so run must also fail
 
         # --- Prepare and send response ---
         response_data = {
             'status': 'success',
-            'saved_as': final_save_filename,
-            'saved_path': str(Path(save_filepath_str).relative_to(config['SERVER_DIR'])) if save_filepath_str else None,
+            'saved_as': final_save_filename, # Display filename (relative for git, just name for fallback)
+            'saved_path': str(Path(save_filepath_str).relative_to(config['SERVER_DIR'])) if save_filepath_str else None, # Full relative path from server root
             # 'log_file': log_filename, # REMOVED
             'syntax_ok': syntax_ok,
             'syntax_stdout': syntax_stdout, # ADDED
@@ -263,9 +277,9 @@ def submit_code_route():
             'run_stdout': run_stdout, # ADDED
             'run_stderr': run_stderr, # ADDED
             'script_type': script_type,
-            'source_file_marker': extracted_filename_raw,
+            'source_file_marker': extracted_filename_raw, # The original marker text if found and valid
             'git_updated': was_git_updated,
-            'save_location': save_target,
+            'save_location': save_target, # 'git', 'fallback_named', or 'fallback'
             'detected_language': detected_language_name
         }
         print(f"Sending response: {response_data}", file=sys.stderr)
@@ -277,8 +291,10 @@ def submit_code_route():
         traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': f'Internal server error: {e}'}), 500
     finally:
+        # Ensure the lock is released even if errors occur
         if request_lock.locked():
              request_lock.release()
              print("--- Lock released ---", file=sys.stderr)
         else:
              print("W: Lock was not held by this thread in finally block?", file=sys.stderr)
+

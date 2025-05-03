@@ -1,4 +1,3 @@
-# @@FILENAME@@ script_runner.py
 import subprocess
 import sys
 from pathlib import Path

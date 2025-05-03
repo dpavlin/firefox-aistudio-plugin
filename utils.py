@@ -1,4 +1,3 @@
-# @@FILENAME@@ utils.py
 import re
 import os
 from pathlib import Path
@@ -7,7 +6,7 @@ import unicodedata
 import json # For language patterns if needed, or move patterns here
 
 # --- Constants ---
-# Match marker ONLY at the start, after optional whitespace, greedy path capture
+# *** UPDATED REGEX: Made the main capture group greedy (.+) ***
 FILENAME_EXTRACT_REGEX = re.compile(r"^\s*@@FILENAME@@\s+(.+)\s*", re.IGNORECASE)
 FILENAME_SANITIZE_REGEX = re.compile(r'[^\w\.\-\/]+')
 MAX_FILENAME_LENGTH = 200
@@ -87,39 +86,58 @@ def detect_language_and_extension(code: str) -> tuple[str, str]:
     first_lines = code.splitlines()[:3]
     if first_lines:
         first_line = first_lines[0].strip()
-        if first_line.startswith('#!/usr/bin/env python') or first_line.startswith('#!/usr/bin/python'): return '.py', 'Python'
-        if first_line.startswith('#!/bin/bash') or first_line.startswith('#!/bin/sh'): return '.sh', 'Shell'
+        # Handle shebangs first
+        if first_line.startswith('#!'):
+            if 'python' in first_line: return '.py', 'Python'
+            if 'bash' in first_line or 'sh' in first_line: return '.sh', 'Shell'
+            if 'perl' in first_line: return '.pl', 'Perl'
+            if 'node' in first_line: return '.js', 'JavaScript'
+            if 'php' in first_line: return '.php', 'PHP'
+            if 'ruby' in first_line: return '.rb', 'Ruby'
+        # Handle other common file type starts
         if first_line.startswith('<?php'): return '.php', 'PHP'
+        if first_line.startswith('<?xml'): return '.xml', 'XML'
+        if first_line.startswith('<!DOCTYPE html'): return '.html', 'HTML'
+
+    # Use regex patterns for broader detection
     if LANGUAGE_PATTERNS['.html'].search(code): return '.html', 'HTML'
     if LANGUAGE_PATTERNS['.xml'].search(code): return '.xml', 'XML'
     if LANGUAGE_PATTERNS['.json'].search(code):
          try:
-             json.loads(code) # Use standard json library
+             json.loads(code) # Use standard json library for validation
              return '.json', 'JSON'
-         except json.JSONDecodeError: pass
+         except json.JSONDecodeError: pass # Not valid JSON, continue checks
     if LANGUAGE_PATTERNS['.css'].search(code): return '.css', 'CSS'
     if LANGUAGE_PATTERNS['.py'].search(code): return '.py', 'Python'
     if LANGUAGE_PATTERNS['.sh'].search(code): return '.sh', 'Shell'
     if LANGUAGE_PATTERNS['.js'].search(code): return '.js', 'JavaScript'
     if LANGUAGE_PATTERNS['.sql'].search(code): return '.sql', 'SQL'
     if LANGUAGE_PATTERNS['.md'].search(code): return '.md', 'Markdown'
-    # print("W: Cannot detect language. Defaulting to .txt", file=sys.stderr) # Less verbose logging
+
+    # Default if no specific pattern matches
+    # print("W: Cannot detect language. Defaulting to .txt", file=sys.stderr)
     return DEFAULT_EXTENSION, 'Text'
 
 def generate_timestamped_filepath(save_folder_path: Path, extension: str = '.txt', base_prefix="code") -> str:
     """Generates a unique timestamped filepath in the specified save folder."""
     today = datetime.datetime.now().strftime("%Y%m%d")
     counter = 1
-    if not extension.startswith('.'): extension = '.' + extension
-    safe_base_prefix = re.sub(r'[^a-zA-Z0-9_\-]', '_', base_prefix).strip('_')
-    if not safe_base_prefix: safe_base_prefix = "code"
+    if not extension or not extension.startswith('.'): # Ensure valid extension format
+         extension = DEFAULT_EXTENSION
+    # Sanitize base_prefix itself
+    safe_base_prefix = re.sub(r'[^\w\.\-\/]', '_', base_prefix).strip('_./\\') # More aggressive sanitize
+    if not safe_base_prefix: safe_base_prefix = "code" # Fallback prefix
+
     while True:
         filename = f"{safe_base_prefix}_{today}_{counter:03d}{extension}"
         filepath = save_folder_path / filename # Use passed path
         if not filepath.exists():
+            # Return the absolute path as a string
             return str(filepath.resolve())
         counter += 1
         if counter > 999:
-             # print(f"W: Could not find unique filename for prefix '{safe_base_prefix}' after 999 attempts. Adding timestamp.", file=sys.stderr)
-             fallback_filename = f"{safe_base_prefix}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{extension}"
+             # Fallback with timestamp if counter overflows
+             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+             fallback_filename = f"{safe_base_prefix}_{timestamp}{extension}"
+             print(f"W: Counter overflow for '{safe_base_prefix}'. Using fallback: '{fallback_filename}'", file=sys.stderr)
              return str((save_folder_path / fallback_filename).resolve())

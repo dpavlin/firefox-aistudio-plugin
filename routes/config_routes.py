@@ -1,4 +1,3 @@
-# @@FILENAME@@ routes/config_routes.py
 from flask import Blueprint, jsonify, request, current_app # Added Blueprint import
 import sys
 
