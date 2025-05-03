@@ -1,0 +1,135 @@
+Okay, here are instructions for an AI model on how to format the dumped file contents so that the Python script can parse it correctly.
+
+Instructions for Dumping File Contents
+
+When providing the complete contents of all project files, please adhere strictly to the following format for each file:
+
+Start Marker: Begin each file's content with a start marker on its own line:
+
+--- START OF FILE path/to/your/file.ext ---
+
+
+Replace path/to/your/file.ext with the actual, full path of the file relative to the project root (e.g., README.md, extension/popup.js, src/utils/helpers.py).
+
+Do not include backticks (`) around the filename in the START marker.
+
+Opening Code Fence: Immediately following the START marker line, place an opening Markdown code fence including the appropriate language identifier:
+
+```language
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+
+Examples: ```python, ```javascript, ```html, ```css, ```json, ```markdown, ```text
+
+Optional Content Filename Marker: If applicable, the very first line of the actual file content (immediately after the opening code fence) must be the filename marker:
+
+@@FILENAME@@ path/to/your/file.ext
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+
+The path/to/your/file.ext must exactly match the path used in the START marker.
+
+File Content: Insert the entire, unmodified content of the file after the optional @@FILENAME@@ marker (or immediately after the opening code fence if the @@FILENAME@@ marker is not used).
+
+Closing Code Fence: Immediately before the END marker line, place a closing Markdown code fence on its own line:
+
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+
+End Marker: End each file's content with an end marker on its own line:
+
+--- END OF FILE path/to/your/file.ext ---
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+
+The path/to/your/file.ext must exactly match the path used in the corresponding START OF FILE marker.
+
+Example (Python File):
+
+--- START OF FILE src/config_manager.py ---
+```python
+@@FILENAME@@ src/config_manager.py
+import json
+import os
+
+CONFIG_FILE = 'config.json'
+
+def load_config():
+    # Function implementation...
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+# More file content...
+
+def save_config(config):
+    # Function implementation...
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=4)
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+Text
+IGNORE_WHEN_COPYING_END
+
+--- END OF FILE src/config_manager.py ---
+
+**Example (CSS File - without leading @@FILENAME@@):**
+
+```text
+--- START OF FILE extension/highlight.css ---
+```css
+/* Style for the initial highlight */
+.ai-code-capture-highlight {
+  background-color: yellow !important;
+  outline: 2px solid orange !important;
+  transition: background-color 0.5s ease-out, outline 0.5s ease-out;
+}
+
+/* Style after highlight fades */
+.ai-code-capture-highlight-fade {
+  background-color: transparent !important;
+  outline: none !important;
+}
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
+
+--- END OF FILE extension/highlight.css ---
+
+**Key Formatting Points:**
+
+*   Use the exact `--- START OF FILE path/to/file.ext ---` format.
+*   Use the exact `--- END OF FILE path/to/file.ext ---` format.
+*   Filenames in START and END markers must match exactly for each file.
+*   Use Markdown code fences (` ```language` and ` ``` `) immediately surrounding the actual file content (and the optional `@@FILENAME@@` marker).
+*   Include the `@@FILENAME@@ path/to/file.ext` line as the very first line inside the opening code fence *only if it's part of the intended file content*.
+*   Ensure there is at least one blank line between the `--- END OF FILE ... ---` marker of one file and the `--- START OF FILE ... ---` marker of the next file.
+
+Strict adherence to this format is essential for automated processing.
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+IGNORE_WHEN_COPYING_END
