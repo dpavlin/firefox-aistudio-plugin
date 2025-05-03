@@ -1,3 +1,4 @@
+# @@FILENAME@@ routes/status.py
 from flask import Blueprint, jsonify, current_app
 import sys
 
@@ -16,9 +17,11 @@ def get_status():
         'port': config['SERVER_PORT'],
         'auto_run_python': config['auto_run_python'], # Still report runtime value (from flags)
         'auto_run_shell': config['auto_run_shell'],    # Still report runtime value (from flags)
-        'config_file_exists': config['CONFIG_FILE'].is_file(),
-        'config_file_content': current_app.config['load_config_func']() # Load current saved config (port only)
+        # 'config_file_exists': config['CONFIG_FILE'].is_file(), # REMOVED config file check
+        # 'config_file_content': current_app.config['load_config_func']() # REMOVED config file content
     }
+    # Add a field indicating config is only via args now (optional)
+    status_data['config_source'] = 'Command-line arguments only'
     return jsonify(status_data)
 
 @status_bp.route('/test_connection', methods=['GET'])

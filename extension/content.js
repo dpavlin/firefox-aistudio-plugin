@@ -1,3 +1,4 @@
+// @@FILENAME@@ extension/content.js
 // Debounce function (assuming it exists)
 function debounce(func, wait) {
     let timeout;
@@ -105,10 +106,10 @@ function displayOutputNearBlock(targetElement, outputData) {
     if (hasSyntaxOutput) {
         outputHTML += `<strong class="output-label">Syntax Check:</strong>`;
         if (outputData.syntax_stdout?.trim()) {
-            outputHTML += `<pre class="aicapture-stdout">${escapeHtml(outputData.syntax_stdout)}</pre>`; // Escape output
+            outputHTML += `<pre class="aicapture-stdout">${outputData.syntax_stdout}</pre>`;
         }
         if (outputData.syntax_stderr?.trim()) {
-            outputHTML += `<pre class="aicapture-stderr">${escapeHtml(outputData.syntax_stderr)}</pre>`; // Escape output
+            outputHTML += `<pre class="aicapture-stderr">${outputData.syntax_stderr}</pre>`;
         }
     }
 
@@ -116,10 +117,10 @@ function displayOutputNearBlock(targetElement, outputData) {
     if (hasRunOutput) {
         outputHTML += `<strong class="output-label">Execution Run:</strong>`;
          if (outputData.run_stdout?.trim()) {
-            outputHTML += `<pre class="aicapture-stdout">${escapeHtml(outputData.run_stdout)}</pre>`; // Escape output
+            outputHTML += `<pre class="aicapture-stdout">${outputData.run_stdout}</pre>`;
         }
         if (outputData.run_stderr?.trim()) {
-            outputHTML += `<pre class="aicapture-stderr">${escapeHtml(outputData.run_stderr)}</pre>`; // Escape output
+            outputHTML += `<pre class="aicapture-stderr">${outputData.run_stderr}</pre>`;
         }
     }
 
@@ -129,17 +130,6 @@ function displayOutputNearBlock(targetElement, outputData) {
     targetElement.insertAdjacentElement('afterend', outputContainer);
     console.log("AICapture: Injected execution output after block:", targetElement);
 }
-
-// Helper to escape HTML entities in output
-function escapeHtml(unsafe) {
-    if (!unsafe) return '';
-    return unsafe
-         .replace(/&/g, "&amp;")
-         .replace(/</g, "&lt;")
-         .replace(/>/g, "&gt;")
-         .replace(/"/g, "&quot;")
-         .replace(/'/g, "&#039;");
- }
 
 
 // Function called ONLY when stabilization timer completes - NOW calls displayOutputNearBlock
@@ -258,6 +248,7 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
         await sendCodeToServer(highlightTarget, codeElement, blockHash);
     }, STABILIZATION_DELAY_MS);
 
+    // Store the new timer ID (keyed by hash)
     stabilizationTimers.set(blockHash, timerId);
 }
 
@@ -267,6 +258,8 @@ function scanForCodeBlocks() {
     document.querySelectorAll(CODE_BLOCK_SELECTOR).forEach(codeElement => {
         const highlightTarget = codeElement.closest(HIGHLIGHT_TARGET_SELECTOR);
         if (highlightTarget) {
+            // Call the async function, but don't necessarily need to await it here
+            // as resetStabilizationTimer handles its own async logic internally.
             resetStabilizationTimer(highlightTarget, codeElement);
         }
     });
@@ -282,25 +275,42 @@ const observer = new MutationObserver(mutations => {
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     if (node.matches(HIGHLIGHT_TARGET_SELECTOR) || node.querySelector(HIGHLIGHT_TARGET_SELECTOR)) {
-                        potentiallyRelevant = true; break;
+                        potentiallyRelevant = true;
+                        break;
                     }
                 }
             }
         }
-        // Check text content changes
+        // Check if text content changed within a relevant element or its children
         else if (mutation.type === 'characterData') {
+             // Check if the change happened within or is an ancestor of a potential code block
              const targetParent = mutation.target.parentElement?.closest(HIGHLIGHT_TARGET_SELECTOR);
-             if (targetParent) potentiallyRelevant = true;
-             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) potentiallyRelevant = true;
+             if (targetParent) {
+                 potentiallyRelevant = true;
+             }
+             // Also consider changes directly to the code element's text node (if possible)
+             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) {
+                 potentiallyRelevant = true;
+             }
         }
+
         if (potentiallyRelevant) break;
     }
-    if (potentiallyRelevant) { debouncedScan(); }
+
+    if (potentiallyRelevant) {
+        // console.log("AICapture: Relevant mutation detected, queueing debounced scan.");
+        debouncedScan();
+    }
 });
 
 
 // --- Initialization ---
 console.log("AICapture: Starting observer...");
-observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true // ** IMPORTANT: Observe text changes **
+});
+
 console.log("AICapture: Performing initial scan.");
-debouncedScan();
+debouncedScan(); // Use the debounced version for initial scan too

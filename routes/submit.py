@@ -69,29 +69,27 @@ def submit_code_route():
         match = FILENAME_EXTRACT_REGEX.search(received_code) # Uses greedy regex from utils.py
 
         if match:
-            # Marker is guaranteed to be effectively on line 1 due to regex anchor ^
             marker_found_and_valid = True
             extracted_filename_raw = match.group(1).strip()
             print(f"Info: Found marker on first line: '{extracted_filename_raw}'.", file=sys.stderr)
 
-            # Find the first newline character to split off the marker line
             first_newline = received_code.find('\n')
             if first_newline != -1:
-                code_to_save = received_code[first_newline + 1:] # Content starts after the newline
+                code_to_save = received_code[first_newline + 1:]
             else:
-                code_to_save = "" # Marker was the only content
+                code_to_save = ""
 
             print(f"Info: Stripped marker line. Code to save length: {len(code_to_save)}", file=sys.stderr)
             sanitized_path_from_marker = sanitize_filename(extracted_filename_raw)
             if not sanitized_path_from_marker:
                 print(f"W: Filename sanitization failed for '{extracted_filename_raw}'. Reverting to fallback.", file=sys.stderr)
-                marker_found_and_valid = False # Treat as invalid if sanitization fails
-                code_to_save = received_code # Revert to original (BOM-stripped) code
+                marker_found_and_valid = False
+                code_to_save = received_code
                 extracted_filename_raw = None
         else:
             print("Info: No valid @@FILENAME@@ marker found at the start.", file=sys.stderr)
             marker_found_and_valid = False
-            # code_to_save remains original (BOM-stripped)
+
 
         # --- Determine Save Path (Git or Fallback) ---
         if marker_found_and_valid: # Use marker info ONLY if found and sanitized
@@ -138,15 +136,15 @@ def submit_code_route():
         # --- *** ADDED: Strip Optional End Marker before Saving *** ---
         original_code_to_save = code_to_save # Keep a copy for fallback naming if needed
         lines = code_to_save.splitlines()
+        # Find index of the last line with actual content
         last_line_index = -1
-        # Find the index of the last non-empty line
         for i in range(len(lines) - 1, -1, -1):
             if lines[i].strip():
                 last_line_index = i
                 break
 
         if last_line_index != -1:
-            # Check if the last non-empty line matches the end marker format
+            # Check if this last non-empty line matches the end marker pattern
             if END_MARKER_REGEX.match(lines[last_line_index]):
                  print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
                  # Reconstruct code excluding the marker line and potential empty lines after it
@@ -154,10 +152,14 @@ def submit_code_route():
                  # Add back a single trailing newline if the result is not empty
                  if code_to_save:
                      code_to_save += "\n"
+                 # If stripping made it empty, keep it empty
+                 elif not code_to_save.strip():
+                      code_to_save = ""
+
             else:
                  # Ensure code ends with a single newline if it wasn't the marker
                  code_to_save = code_to_save.rstrip() + "\n"
-        # If code_to_save was empty or only whitespace to begin with, it remains empty or just "\n"
+        # If code_to_save was entirely empty or only whitespace initially, it remains unchanged here
 
 
         # --- Handle Saving ---
@@ -187,10 +189,8 @@ def submit_code_route():
 
         else: # save_target == "fallback" (timestamped)
             # Use the language from the *original* code_to_save (before end marker strip)
-            # in case the end marker was the only thing left.
             ext_for_fallback, detected_language_name = detect_language_and_extension(original_code_to_save)
             base_name = "code"
-            # Use sanitized filename part for prefix only if marker was valid originally
             if marker_found_and_valid and sanitized_path_from_marker:
                  base_name = Path(sanitized_path_from_marker).stem
             elif detected_language_name not in ["Unknown", "Text"]:
@@ -217,7 +217,7 @@ def submit_code_route():
              return jsonify({'status': 'error', 'message': 'Internal error: Saved file path invalid.'}), 500
 
         check_run_filepath = save_filepath_str
-        display_filename = final_save_filename # This should always be set now
+        display_filename = final_save_filename
         file_extension = Path(display_filename).suffix.lower()
 
         # Determine relative path for logging
@@ -234,15 +234,22 @@ def submit_code_route():
             is_server_script = Path(check_run_filepath).resolve() == (config['SERVER_DIR'] / config['THIS_SCRIPT_NAME']).resolve()
             if not is_server_script:
                 try:
-                    # Read the *saved* code for syntax check
                     saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
-                    compile(saved_code_content, check_run_filepath, 'exec')
-                    syntax_ok = True
+                    # Only try to compile if there's actual code content
+                    if saved_code_content.strip():
+                        compile(saved_code_content, check_run_filepath, 'exec')
+                        syntax_ok = True
+                    else:
+                        syntax_ok = True # Empty file is valid syntax
+                        print(f"Info: Skipping python run for empty file: {check_run_filepath_rel}", file=sys.stderr)
+
                     # No separate syntax output for Python compile
-                    if config['auto_run_python']:
+                    if syntax_ok and config['auto_run_python'] and saved_code_content.strip():
                         print(f"Attempting auto-run for Python script: {check_run_filepath}", file=sys.stderr)
                         # Capture output from run_script
                         run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'python')
+                    elif not syntax_ok:
+                        run_success = False # Ensure run_success is false if syntax check failed
                 except SyntaxError as py_syntax_e:
                     print(f"E: Python syntax error in '{check_run_filepath_rel}': {py_syntax_e}", file=sys.stderr)
                     syntax_ok = False; run_success = False
@@ -279,7 +286,7 @@ def submit_code_route():
             'run_stdout': run_stdout, # ADDED
             'run_stderr': run_stderr, # ADDED
             'script_type': script_type,
-            'source_file_marker': extracted_filename_raw, # Original marker text if found and valid
+            'source_file_marker': extracted_filename_raw,
             'git_updated': was_git_updated,
             'save_location': save_target,
             'detected_language': detected_language_name
@@ -293,7 +300,6 @@ def submit_code_route():
         traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': f'Internal server error: {e}'}), 500
     finally:
-        # Ensure the lock is released even if errors occur
         if request_lock.locked():
              request_lock.release()
              print("--- Lock released ---", file=sys.stderr)

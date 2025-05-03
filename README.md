@@ -18,12 +18,26 @@ sudo apt install python3-flask python3-flask-cors
 
 ```bash
 # Navigate to your project's root directory first
-# Auto-run for Python/Shell is DISABLED by default.
-# Use flags to enable (DANGEROUS):
-python3 server.py [--port <port_number>] [--enable-python-run] [--shell]
+# Example: Start on default port 5000
+python3 server.py
+
+# Example: Start on port 5001
+python3 server.py -p 5001
+
+# Example: Enable Python execution (Use with caution!)
+python3 server.py --python
+
+# Example: Enable Shell execution (DANGEROUS!)
+python3 server.py --shell
+
+# Example: Combine options
+python3 server.py -p 5050 --python --shell
 ```
-*Default port is 5000.*
-*Auto-run settings are controlled **only** by server startup flags.*
+*   `-p <port>` or `--port <port>`: Specifies the listening port (default: 5000).
+*   `--python`: Enables auto-execution of received Python files. **Use with caution!**
+*   `--shell`: Enables auto-execution of received Shell scripts. **DANGEROUS! Use only if you fully trust the AI's output and understand the risks.**
+
+*Note: The server no longer uses `server_config.json`. Port and auto-run settings are controlled only at startup.*
 
 ## Load Temporary Add-on in Firefox
 
@@ -31,6 +45,15 @@ python3 server.py [--port <port_number>] [--enable-python-run] [--shell]
 2.  Click "This Firefox".
 3.  Click "Load Temporary Add-on...".
 4.  Select the `manifest.json` file inside the `extension` directory.
+
+## Configure Extension Popup
+
+1.  Click the AI Code Capture icon in the Firefox toolbar.
+2.  Enter the **Port** number corresponding to the running server instance you want *this specific AI Studio tab* to communicate with.
+3.  Use the **Active** toggle to enable/disable the extension globally.
+4.  Click **Test** to verify the connection and view server status (including read-only auto-run status based on server flags).
+
+*Port settings are saved per-tab.*
 
 ## Pack and Send Source Code to Model
 
@@ -45,7 +68,9 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 ## Google AI Studio Prompt Instructions
 
-**Crucial:** Instruct the AI how to format its output. Use the content of `prompt.txt`.
+**Crucial:** Instruct the AI how to format its output. Include this in your prompt (refer to `prompt.txt` for the full recommended prompt):
+
+> ALWAYS add in the very first line marker `@@FILENAME@@ path/to/modified/file.ext`.
 
 ## Git Integration
 
@@ -54,11 +79,5 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 ## Multiple Projects in Separate Tabs
 
-*   Use the server's `--port <number>` option to run multiple instances on different ports for different projects.
-*   Configure the matching port number in the extension popup *for each corresponding AI Studio tab*. The port setting is now tab-specific.
-
-## Execution Output
-
-*   If auto-run is enabled via server flags, the `stdout` and `stderr` from syntax checks and script execution will be injected directly into the AI Studio page below the processed code block.
-*   Execution output is *not* saved to log files.
-
+*   Use the server's `-p <number>` option to run multiple instances on different ports for different projects.
+*   Configure the matching port number in the extension popup for each corresponding AI Studio tab. The extension saves the port setting independently for each tab.

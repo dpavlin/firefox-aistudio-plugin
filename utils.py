@@ -1,3 +1,4 @@
+# @@FILENAME@@ utils.py
 import re
 import os
 from pathlib import Path
@@ -6,7 +7,7 @@ import unicodedata
 import json # For language patterns if needed, or move patterns here
 
 # --- Constants ---
-# Match marker ONLY at the start, after optional whitespace, greedy path capture
+# *** UPDATED REGEX: Made the main capture group greedy (.+) ***
 FILENAME_EXTRACT_REGEX = re.compile(r"^\s*@@FILENAME@@\s+(.+)\s*", re.IGNORECASE)
 FILENAME_SANITIZE_REGEX = re.compile(r'[^\w\.\-\/]+')
 MAX_FILENAME_LENGTH = 200
