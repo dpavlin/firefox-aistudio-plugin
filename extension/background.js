@@ -123,17 +123,28 @@ async function storeActivationState(isActive) {
      }
 }
 
-// NEW: Get last stored output object for a tab
+
+// *** MODIFY getLasyOutputObject helper for more robust logging ***
 async function getLastOutputObject() {
+    console.log("BG DEBUG: Entering getLastOutputObject"); // Log entry
     try {
         let data = await browser.storage.local.get(STORAGE_LAST_OUTPUT_KEY);
+        console.log("BG DEBUG: Raw data from storage.local.get:", data); // Log raw storage result
         const outputObj = data?.[STORAGE_LAST_OUTPUT_KEY];
         if (typeof outputObj === 'object' && outputObj !== null) {
+            console.log("BG DEBUG: Found valid output object in storage:", outputObj);
             return outputObj;
+        } else {
+             console.log("BG DEBUG: No valid output object found in storage (key:", STORAGE_LAST_OUTPUT_KEY, "). Returning empty object.");
+             return {}; // Return empty if not found or invalid type
         }
-    } catch (error) { console.error("BG Error getting last output object:", error); }
-    return {};
+    } catch (error) {
+        console.error("BG Error in getLastOutputObject:", error); // Log error specifically here
+        return {}; // Return empty object on error
+    }
 }
+
+
 
 // NEW: Store output details for a tab
 async function storeLastOutput(tabId, outputDetails) {
@@ -210,13 +221,18 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
   // --- NEW: Get Last Output ---
    else if (request.action === "getLastOutput") {
+        console.log("BG DEBUG: Handling getLastOutput action"); // Log handler entry
         const tabIdToGet = request.tabId ?? senderTabId;
          if (typeof tabIdToGet !== 'number') {
-             return Promise.resolve({ output: null }); // Return null on error
+             console.error("BG: Invalid tabId for getLastOutput:", tabIdToGet);
+             // *** Explicitly return promise with null ***
+             return Promise.resolve({ output: null });
          }
-         const outputObj = await getLastOutputObject();
-         const lastOutput = outputObj[tabIdToGet] || null; // Get output for this specific tab
-         // console.log(`BG: Responding to getLastOutput for tab ${tabIdToGet} with:`, lastOutput);
+         console.log(`BG DEBUG: Attempting to get output object for tabId: ${tabIdToGet}`);
+         const outputObj = await getLastOutputObject(); // Calls the enhanced helper
+         const lastOutput = outputObj?.[tabIdToGet] || null; // Use optional chaining for safety
+         console.log(`BG DEBUG: Retrieved output for tab ${tabIdToGet}:`, lastOutput); // Log the specific result
+         // *** Explicitly return promise with retrieved output ***
          return Promise.resolve({ output: lastOutput });
     }
 

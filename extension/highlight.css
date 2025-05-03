@@ -1,4 +1,4 @@
-/* Style for the initial highlight when code is detected (now used during send) */
+/* Style for the initial highlight (during send) */
 .aicapture-highlight {
   /* Use outline to avoid affecting layout, !important might be needed */
   outline: 3px solid #FFD700 !important; /* Bright yellow/gold outline */
@@ -44,4 +44,52 @@
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* REMOVED .aicapture-fadeout class */
+/* --- NEW Styles for Injected Output --- */
+.aicapture-output-container {
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  padding: 8px 12px;
+  margin-top: 8px; /* Space below the code block */
+  margin-bottom: 16px; /* Space before next potential block */
+  border-radius: 4px;
+  font-size: 12px; /* Slightly smaller than main text */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.aicapture-output-container .output-label {
+  font-weight: bold;
+  color: #444;
+  font-size: 11px;
+  display: block;
+  margin-bottom: 3px;
+  margin-top: 5px;
+}
+.aicapture-output-container .output-label:first-of-type {
+    margin-top: 0;
+}
+
+.aicapture-output-container pre {
+  white-space: pre-wrap;       /* CSS3 */
+  white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+  white-space: -pre-wrap;      /* Opera 4-6 */
+  white-space: -o-pre-wrap;    /* Opera 7 */
+  word-wrap: break-word;       /* Internet Explorer 5.5+ */
+  background-color: #eee;
+  border: 1px solid #ddd;
+  padding: 6px 8px;
+  margin: 0 0 8px 0; /* Margin below each pre */
+  max-height: 150px; /* Limit height */
+  overflow-y: auto;
+  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+  color: #333;
+  border-radius: 3px;
+}
+
+.aicapture-output-container pre.aicapture-stderr {
+  background-color: #f2dede;
+  color: #a94442;
+  border-color: #ebccd1;
+}
+
+/* @@FILENAME@@ extension/highlight.css */
