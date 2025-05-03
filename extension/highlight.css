@@ -1,13 +1,10 @@
-/* Style for the initial highlight when code is detected (now used during send) */
+/* Style for the initial highlight (during send) */
 .aicapture-highlight {
-  /* Use outline to avoid affecting layout, !important might be needed */
   outline: 3px solid #FFD700 !important; /* Bright yellow/gold outline */
   outline-offset: 2px;
   background-color: rgba(255, 215, 0, 0.15) !important;
   border-radius: 4px;
   box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-
-  /* Smooth transition for change */
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
@@ -17,10 +14,8 @@
   outline-offset: 2px;
   background-color: rgba(180, 180, 255, 0.08) !important; /* Very faint blue background */
   border-radius: 4px;
-  /* Smooth transition for appearance/removal */
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
-
 
 /* Style for SUCCESSFUL processing (persistent) */
 .aicapture-success {
@@ -29,7 +24,6 @@
   background-color: rgba(40, 167, 69, 0.15) !important; /* Faint green background */
   box-shadow: 0 0 12px rgba(40, 167, 69, 0.6);
   border-radius: 4px;
-  /* Transition for smooth appearance when applied */
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
@@ -40,8 +34,61 @@
   background-color: rgba(220, 53, 69, 0.15) !important; /* Faint red background */
   box-shadow: 0 0 12px rgba(220, 53, 69, 0.6);
   border-radius: 4px;
-  /* Transition for smooth appearance when applied */
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* REMOVED .aicapture-fadeout class */
+/* --- Styles for Injected Output (Theme Inheriting Attempt) --- */
+.aicapture-output-container {
+  /* REMOVED explicit background-color */
+  /* Use a theme-agnostic border */
+  border: 1px solid rgba(128, 128, 128, 0.3); /* Semi-transparent grey */
+  padding: 8px 12px;
+  margin-top: 8px; /* Space below the code block */
+  margin-bottom: 16px; /* Space before next potential block */
+  border-radius: 4px;
+  font-size: 12px; /* Slightly smaller than main text */
+  /* Inherits text color */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* Subtle shadow */
+}
+
+.aicapture-output-container .output-label {
+  font-weight: bold;
+  /* Inherits color */
+  /* color: #444; */ /* Removed explicit color */
+  font-size: 11px;
+  display: block;
+  margin-bottom: 3px;
+  margin-top: 5px;
+}
+.aicapture-output-container .output-label:first-of-type {
+    margin-top: 0;
+}
+
+.aicapture-output-container pre {
+  white-space: pre-wrap;       /* CSS3 */
+  white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+  white-space: -pre-wrap;      /* Opera 4-6 */
+  white-space: -o-pre-wrap;    /* Opera 7 */
+  word-wrap: break-word;       /* Internet Explorer 5.5+ */
+  /* REMOVED explicit background-color */
+  /* background-color: #eee; */
+  /* Adjust border for theme visibility */
+  border: 1px solid rgba(128, 128, 128, 0.2); /* Fainter grey */
+  padding: 6px 8px;
+  margin: 0 0 8px 0; /* Margin below each pre */
+  max-height: 150px; /* Limit height */
+  overflow-y: auto;
+  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+  /* Inherits text color */
+  /* color: #333; */ /* Removed explicit color */
+  border-radius: 3px;
+}
+
+.aicapture-output-container pre.aicapture-stderr {
+  /* REMOVED background-color */
+  /* REMOVED color */
+  border: 1px solid rgba(255, 0, 0, 0.5); /* Semi-transparent red border */
+  /* Optionally add subtle background based on potential CSS vars (requires inspection) */
+  /* background-color: var(--vscode-errorForeground, rgba(255,0,0,0.05)); */
+}

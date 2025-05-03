@@ -101,23 +101,22 @@ def submit_code_route():
                 if '/' not in sanitized_path_from_marker.replace('\\', '/'):
                     found_rel_path = find_tracked_file_by_name(sanitized_path_from_marker, config['SERVER_DIR'], config['IS_REPO'])
                     if found_rel_path:
+                        print(f"Info: Found unique tracked file via basename: '{found_rel_path}'", file=sys.stderr)
                         git_path_to_check = found_rel_path
                     else:
-                        # If basename search fails, still proceed with checking the sanitized_path_from_marker itself
-                        pass # print(f"Info: Basename '{sanitized_path_from_marker}' not found uniquely in Git or search failed. Checking relative path.", file=sys.stderr)
-
+                         print(f"Info: Basename '{sanitized_path_from_marker}' not found uniquely in Git or search failed. Checking relative path.", file=sys.stderr)
 
                 potential_target_abs = (config['SERVER_DIR'] / git_path_to_check).resolve()
 
                 if str(potential_target_abs).startswith(str(config['SERVER_DIR'])):
                     is_tracked = is_git_tracked(git_path_to_check, config['SERVER_DIR'], config['IS_REPO'])
                     if is_tracked:
-                        # print(f"Info: Target path '{git_path_to_check}' is tracked. Setting target to 'git'.", file=sys.stderr)
+                        print(f"Info: Target path '{git_path_to_check}' is tracked. Setting target to 'git'.", file=sys.stderr)
                         absolute_path_target = potential_target_abs
                         save_target = "git"
                         final_save_filename = git_path_to_check
                     else:
-                        # print(f"Info: Target path '{git_path_to_check}' exists but is not tracked by Git. Setting target to 'fallback_named'.", file=sys.stderr)
+                        print(f"Info: Target path '{git_path_to_check}' exists but is not tracked by Git. Setting target to 'fallback_named'.", file=sys.stderr)
                         absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
                         save_target = "fallback_named"
                 else:
@@ -126,7 +125,7 @@ def submit_code_route():
             else: # Not a Git repo
                  absolute_path_target = (config['SAVE_FOLDER_PATH'] / sanitized_path_from_marker).resolve()
                  if str(absolute_path_target).startswith(str(config['SAVE_FOLDER_PATH'])):
-                    #   print(f"Info: Not a git repo. Setting target to 'fallback_named': '{sanitized_path_from_marker}'", file=sys.stderr)
+                      print(f"Info: Not a git repo. Setting target to 'fallback_named': '{sanitized_path_from_marker}'", file=sys.stderr)
                       save_target = "fallback_named"
                  else:
                       print(f"W: Potential target path '{absolute_path_target}' is outside SAVE_FOLDER. Reverting to fallback.", file=sys.stderr)
@@ -136,27 +135,29 @@ def submit_code_route():
             save_target = "fallback"
 
 
-        # --- Strip Optional End Marker before Saving ---
+        # --- *** ADDED: Strip Optional End Marker before Saving *** ---
         original_code_to_save = code_to_save # Keep a copy for fallback naming if needed
         lines = code_to_save.splitlines()
         last_line_index = -1
-        # Find the last non-empty line index
+        # Find the index of the last non-empty line
         for i in range(len(lines) - 1, -1, -1):
             if lines[i].strip():
                 last_line_index = i
                 break
 
-        # Check if the last non-empty line matches the end marker pattern
-        if last_line_index != -1 and END_MARKER_REGEX.match(lines[last_line_index]):
-             print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
-             # Reconstruct code excluding the marker line and potential empty lines after it
-             code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
-             # Add back a single trailing newline if the result is not empty
-             if code_to_save:
-                 code_to_save += "\n"
-        elif code_to_save: # If not the marker and not empty, ensure single trailing newline
-             code_to_save = code_to_save.rstrip() + "\n"
-        # If code_to_save was empty initially, it remains empty
+        if last_line_index != -1:
+            # Check if the last non-empty line matches the end marker format
+            if END_MARKER_REGEX.match(lines[last_line_index]):
+                 print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
+                 # Reconstruct code excluding the marker line and potential empty lines after it
+                 code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
+                 # Add back a single trailing newline if the result is not empty
+                 if code_to_save:
+                     code_to_save += "\n"
+            else:
+                 # Ensure code ends with a single newline if it wasn't the marker
+                 code_to_save = code_to_save.rstrip() + "\n"
+        # If code_to_save was empty or only whitespace to begin with, it remains empty or just "\n"
 
 
         # --- Handle Saving ---
@@ -186,6 +187,7 @@ def submit_code_route():
 
         else: # save_target == "fallback" (timestamped)
             # Use the language from the *original* code_to_save (before end marker strip)
+            # in case the end marker was the only thing left.
             ext_for_fallback, detected_language_name = detect_language_and_extension(original_code_to_save)
             base_name = "code"
             # Use sanitized filename part for prefix only if marker was valid originally
@@ -232,7 +234,7 @@ def submit_code_route():
             is_server_script = Path(check_run_filepath).resolve() == (config['SERVER_DIR'] / config['THIS_SCRIPT_NAME']).resolve()
             if not is_server_script:
                 try:
-                    # Read the *saved* (potentially stripped) code for syntax check
+                    # Read the *saved* code for syntax check
                     saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
                     compile(saved_code_content, check_run_filepath, 'exec')
                     syntax_ok = True
@@ -267,8 +269,8 @@ def submit_code_route():
         # --- Prepare and send response ---
         response_data = {
             'status': 'success',
-            'saved_as': final_save_filename, # Display filename (relative for git, just name for fallback)
-            'saved_path': str(Path(save_filepath_str).relative_to(config['SERVER_DIR'])) if save_filepath_str else None, # Full relative path from server root
+            'saved_as': final_save_filename,
+            'saved_path': str(Path(save_filepath_str).relative_to(config['SERVER_DIR'])) if save_filepath_str else None,
             # 'log_file': log_filename, # REMOVED
             'syntax_ok': syntax_ok,
             'syntax_stdout': syntax_stdout, # ADDED
@@ -277,9 +279,9 @@ def submit_code_route():
             'run_stdout': run_stdout, # ADDED
             'run_stderr': run_stderr, # ADDED
             'script_type': script_type,
-            'source_file_marker': extracted_filename_raw, # The original marker text if found and valid
+            'source_file_marker': extracted_filename_raw, # Original marker text if found and valid
             'git_updated': was_git_updated,
-            'save_location': save_target, # 'git', 'fallback_named', or 'fallback'
+            'save_location': save_target,
             'detected_language': detected_language_name
         }
         print(f"Sending response: {response_data}", file=sys.stderr)
