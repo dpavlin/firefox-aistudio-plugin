@@ -1,4 +1,3 @@
-// @@FILENAME@@ extension/content.js
 // Debounce function (assuming it exists)
 function debounce(func, wait) {
     let timeout;
@@ -72,7 +71,6 @@ function removeAllHighlights(element) {
         element.classList.remove(
             'aicapture-highlight', 'aicapture-pending',
             'aicapture-success', 'aicapture-error'
-            // No fadeout class anymore
         );
     }
 }
@@ -140,37 +138,15 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
     if (!highlightTarget || !codeElement) return;
 
     const codeContent = codeElement.textContent || '';
-    // Calculate hash regardless of marker presence to clear potential old timers/status
+    // Hash is needed regardless of marker presence to check/clear status/timers
     const blockHash = hashCode(codeContent);
 
-    if (!codeContent.trimStart().startsWith(FILENAME_MARKER)) {
-        // Marker not present (or removed) - ensure no timer and no highlight for this specific hash
-        if (stabilizationTimers.has(blockHash)) {
-            clearTimeout(stabilizationTimers.get(blockHash));
-            stabilizationTimers.delete(blockHash);
-        }
-        // Check stored status - if it was pending for this hash, clear it. Don't clear sent/error.
-        const storedStatus = await getStoredStatus(blockHash);
-        if (storedStatus === 'pending') {
-             await setStoredStatus(blockHash, null); // Clear pending status
-        }
-         // Only remove highlights if status isn't final success/error
-        if (storedStatus !== 'sent' && storedStatus !== 'error') {
-            removeAllHighlights(highlightTarget);
-        }
-        return;
-    }
-
-    // Marker is present, proceed.
-
-    // Check persistent storage - don't process if already sent or errored
+    // Check persistent storage first - If already done, just apply final highlight and exit
     const storedStatus = await getStoredStatus(blockHash);
     if (storedStatus === 'sent' || storedStatus === 'error') {
         // console.log(`AICapture: Timer skip for hash ${blockHash} - already processed (status: ${storedStatus}). Applying final highlight.`);
-        // Re-apply final highlight in case it was somehow removed
         removeAllHighlights(highlightTarget);
         highlightTarget.classList.add(storedStatus === 'sent' ? 'aicapture-success' : 'aicapture-error');
-        // Ensure no timer is running for this hash
          if (stabilizationTimers.has(blockHash)) {
             clearTimeout(stabilizationTimers.get(blockHash));
             stabilizationTimers.delete(blockHash);
@@ -178,7 +154,23 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
         return;
     }
 
-    // --- Proceed with timer logic ---
+    // Now check for the marker
+    if (!codeContent.trimStart().startsWith(FILENAME_MARKER)) {
+        // Marker not present (or removed) - ensure no timer and potentially clear pending status/highlight
+        if (stabilizationTimers.has(blockHash)) {
+            clearTimeout(stabilizationTimers.get(blockHash));
+            stabilizationTimers.delete(blockHash);
+            console.log(`AICapture: Marker removed, clearing timer for hash ${blockHash}`);
+            // If status was pending, clear it from storage
+            if (storedStatus === 'pending') {
+                await setStoredStatus(blockHash, null);
+            }
+            removeAllHighlights(highlightTarget); // Remove pending highlight
+        }
+        return;
+    }
+
+    // --- Marker is present and status is not final: Proceed with timer logic ---
 
     // Clear existing timer for this specific hash
     if (stabilizationTimers.has(blockHash)) {
@@ -191,13 +183,14 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
     // Add the pending highlight (ensure others removed)
     removeAllHighlights(highlightTarget);
     highlightTarget.classList.add('aicapture-pending');
-    // Mark as pending in storage
+    // Mark as pending in storage - helps restore state on reload
     await setStoredStatus(blockHash, 'pending');
 
     // Start a new timer
     const timerId = setTimeout(async () => {
-        // Timer completed, proceed to send (sendCodeToServer handles final status check)
+        // Timer completed without being reset, proceed to send
         stabilizationTimers.delete(blockHash); // Remove from timer map first
+        // Status will be checked again inside sendCodeToServer before sending
         await sendCodeToServer(highlightTarget, codeElement, blockHash);
     }, STABILIZATION_DELAY_MS);
 
@@ -223,7 +216,7 @@ const debouncedScan = debounce(scanForCodeBlocks, OBSERVER_DEBOUNCE_MS);
 
 // --- Mutation Observer ---
 const observer = new MutationObserver(mutations => {
-    // ... (Observer logic to detect relevant changes remains the same) ...
+    // Observer logic remains the same - triggers debouncedScan on relevant changes
     let potentiallyRelevant = false;
     for (const mutation of mutations) {
         // Check added nodes
@@ -231,31 +224,23 @@ const observer = new MutationObserver(mutations => {
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     if (node.matches(HIGHLIGHT_TARGET_SELECTOR) || node.querySelector(HIGHLIGHT_TARGET_SELECTOR)) {
-                        potentiallyRelevant = true;
-                        break;
+                        potentiallyRelevant = true; break;
+                    }
+                    if (node.matches(CODE_BLOCK_SELECTOR) || node.querySelector(CODE_BLOCK_SELECTOR)) {
+                        potentiallyRelevant = true; break;
                     }
                 }
             }
         }
         // Check if text content changed within a relevant element or its children
         else if (mutation.type === 'characterData') {
-             // Check if the change happened within or is an ancestor of a potential code block
              const targetParent = mutation.target.parentElement?.closest(HIGHLIGHT_TARGET_SELECTOR);
-             if (targetParent) {
-                 potentiallyRelevant = true;
-             }
-             // Also consider changes directly to the code element's text node (if possible)
-             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) {
-                 potentiallyRelevant = true;
-             }
+             if (targetParent) potentiallyRelevant = true;
+             else if (mutation.target.parentElement?.matches(CODE_BLOCK_SELECTOR)) potentiallyRelevant = true;
         }
-
         if (potentiallyRelevant) break;
     }
-    if (potentiallyRelevant) {
-        // console.log("AICapture: Relevant mutation detected, queueing debounced scan.");
-        debouncedScan();
-    }
+    if (potentiallyRelevant) { debouncedScan(); }
 });
 
 
@@ -264,9 +249,9 @@ console.log("AICapture: Starting observer...");
 observer.observe(document.body, {
     childList: true,
     subtree: true,
-    characterData: true // ** IMPORTANT: Observe text changes **
+    characterData: true
 });
 
 // Initial scan on load
 console.log("AICapture: Performing initial scan.");
-debouncedScan(); // Use the debounced version for initial scan too
+debouncedScan();

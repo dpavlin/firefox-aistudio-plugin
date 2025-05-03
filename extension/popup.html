@@ -3,7 +3,7 @@
 <head>
     <title>AI Code Capture</title>
     <style>
-        /* Compact styling - Styles remain the same */
+        /* Styles remain the same */
         body { font-family: sans-serif; width: 300px; padding: 8px; background-color: #f0f0f0; color: #333; font-size: 13px; }
         h1 { font-size: 15px; margin-top: 0; margin-bottom: 10px; color: #1a1a1a; border-bottom: 1px solid #ccc; padding-bottom: 4px; text-align: center; }
         h2 { font-size: 13px; margin-top: 10px; margin-bottom: 6px; color: #333; border-bottom: none; padding-bottom: 3px; font-weight: bold; }
@@ -28,7 +28,7 @@
         input[disabled] + .slider:before { background-color: #f0f0f0; }
         #status-container { margin-top: 8px; border-top: 1px solid #ccc; padding-top: 8px; }
         #status-container h2 { font-size: 13px; margin-bottom: 4px; font-weight: bold; }
-        #last-response { font-size: 11px; background-color: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 100px; overflow-y: auto; color: #555; margin-bottom: 0; }
+        #last-response { font-size: 11px; background-color: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 60px; overflow-y: auto; color: #555; margin-bottom: 0; }
         #last-response.error { color: #a94442; background-color: #f2dede; border-color: #ebccd1; }
         #last-response.success { color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; }
         #last-response.info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; }
@@ -37,6 +37,15 @@
         .info-section h2 { text-align: left; font-size: 12px; color: #555; margin-bottom: 4px; padding-bottom: 2px; }
          .info-section .settings-grid { margin-bottom: 4px; }
         .warning-text { font-size: 10px; color: #8a6d3b; text-align: center; margin-top: 4px; }
+        /* NEW Styles for output section */
+        #output-container { margin-top: 8px; border-top: 1px solid #ccc; padding-top: 8px; }
+        #output-container h2 { font-size: 13px; margin-bottom: 4px; font-weight: bold; }
+        #output-container .output-area { font-size: 11px; background-color: #f8f8f8; border: 1px solid #ddd; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 120px; overflow-y: auto; color: #333; margin-bottom: 5px; font-family: monospace; }
+        #output-container .output-area.stderr { background-color: #f2dede; color: #a94442; border-color: #ebccd1; }
+        #output-container .output-label { font-size: 10px; font-weight: bold; color: #555; display: block; margin-bottom: 2px; }
+        #output-container .timestamp { font-size: 9px; color: #777; text-align: right; margin-top: -2px; margin-bottom: 4px; display: block;}
+        #output-container .no-output { font-style: italic; color: #888; font-size: 11px; }
+
     </style>
 </head>
 <body>
@@ -83,24 +92,41 @@
              <!-- Display Auto-Run Status (Read-only from server flags) -->
              <label>Py Auto-Run:</label>
              <div class="control-area">
-                 <span id="serverPyRunStatus" class="info-text" title="Python Auto-Run (Set via server flag)">...</span>
+                 <span id="serverPyRunStatus" class="info-text" title="Python Auto-Run (Set via server flag --enable-python-run)">...</span>
              </div>
               <label>Sh Auto-Run:</label>
              <div class="control-area">
-                 <span id="serverShRunStatus" class="info-text" title="Shell Auto-Run (Set via server flag)">...</span>
+                 <span id="serverShRunStatus" class="info-text" title="Shell Auto-Run (Set via server flag --shell)">...</span>
              </div>
          </div>
      </div>
 
     <!-- REMOVED Backend Config Section -->
-    <!-- <div class="config-section"> ... </div> -->
 
     <!-- Status Area -->
     <div id="status-container">
-        <h2>Status</h2> <!-- Simplified header -->
+        <h2>Status</h2>
         <pre id="last-response">Loading...</pre>
     </div>
+
+    <!-- NEW Execution Output Area -->
+    <div id="output-container" style="display: none;"> <!-- Initially hidden -->
+        <h2>Last Execution Output</h2>
+        <span class="timestamp" id="output-timestamp"></span>
+
+        <span class="output-label">Syntax Check STDOUT:</span>
+        <pre id="syntax-stdout" class="output-area"><span class="no-output">(N/A)</span></pre>
+        <span class="output-label">Syntax Check STDERR:</span>
+        <pre id="syntax-stderr" class="output-area stderr"><span class="no-output">(N/A)</span></pre>
+
+        <span class="output-label">Run STDOUT:</span>
+        <pre id="run-stdout" class="output-area"><span class="no-output">(N/A)</span></pre>
+        <span class="output-label">Run STDERR:</span>
+        <pre id="run-stderr" class="output-area stderr"><span class="no-output">(N/A)</span></pre>
+    </div>
+
 
     <script src="popup.js"></script>
 </body>
 </html>
+<!-- @@FILENAME@@ extension/popup.html -->

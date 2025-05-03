@@ -1,4 +1,3 @@
-# @@FILENAME@@ routes/status.py
 from flask import Blueprint, jsonify, current_app
 import sys
 
