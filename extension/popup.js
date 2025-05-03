@@ -8,12 +8,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Status display elements
     const serverCwdDisplay = document.getElementById('serverCwdDisplay');
     const serverSaveDirDisplay = document.getElementById('serverSaveDirDisplay');
-    const serverLogDirDisplay = document.getElementById('serverLogDirDisplay');
+    // const serverLogDirDisplay = document.getElementById('serverLogDirDisplay'); // REMOVED
     const serverGitStatusDisplay = document.getElementById('serverGitStatusDisplay');
+    const serverPyRunStatus = document.getElementById('serverPyRunStatus'); // Added for read-only status
+    const serverShRunStatus = document.getElementById('serverShRunStatus'); // Added for read-only status
 
-    // Server config elements
-    const serverEnablePython = document.getElementById('serverEnablePython');
-    const serverEnableShell = document.getElementById('serverEnableShell');
+
+    // REMOVED Server config elements
+    // const serverEnablePython = document.getElementById('serverEnablePython');
+    // const serverEnableShell = document.getElementById('serverEnableShell');
     const restartWarning = document.getElementById('restartWarning');
 
     const DEFAULT_PORT = 5000; // Keep consistent with background
@@ -27,25 +30,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function updateServerInfoDisplay(details) {
-        serverCwdDisplay.textContent = details.working_directory || 'N/A';
+        const cwd = details.working_directory || 'N/A';
+        serverCwdDisplay.textContent = cwd;
         serverCwdDisplay.title = details.working_directory || 'Server Current Working Directory';
 
         serverSaveDirDisplay.textContent = details.save_directory || 'N/A';
-        serverSaveDirDisplay.title = `Fallback save directory (relative to ${details.working_directory || 'CWD'})`;
+        serverSaveDirDisplay.title = `Fallback save directory (relative to ${cwd})`;
 
-        serverLogDirDisplay.textContent = details.log_directory || 'N/A';
-        serverLogDirDisplay.title = `Log directory (relative to ${details.working_directory || 'CWD'})`;
+        // serverLogDirDisplay.textContent = details.log_directory || 'N/A'; // REMOVED
+        // serverLogDirDisplay.title = `Log directory (relative to ${cwd})`; // REMOVED
 
-        serverGitStatusDisplay.textContent = details.is_git_repo ? 'Yes' : 'No';
-        serverGitStatusDisplay.title = details.is_git_repo ? 'CWD is a Git repository' : 'CWD is not a Git repository';
-        serverGitStatusDisplay.classList.toggle('status-true', details.is_git_repo);
-        serverGitStatusDisplay.classList.toggle('status-false', !details.is_git_repo);
+        const isGit = details.is_git_repo === true; // Ensure boolean check
+        serverGitStatusDisplay.textContent = isGit ? 'Yes' : 'No';
+        serverGitStatusDisplay.title = isGit ? 'CWD is a Git repository' : 'CWD is not a Git repository';
+        serverGitStatusDisplay.classList.toggle('status-true', isGit);
+        serverGitStatusDisplay.classList.toggle('status-false', !isGit);
 
-        // Update toggles based on SERVER's current running state for the associated port
-        serverEnablePython.checked = details.auto_run_python || false;
-        serverEnableShell.checked = details.auto_run_shell || false;
-        serverEnablePython.disabled = false; // Enable controls after getting status
-        serverEnableShell.disabled = false;
+        // Update read-only status spans for auto-run (based on server flags)
+        const pyRun = details.auto_run_python === true;
+        serverPyRunStatus.textContent = pyRun ? 'Enabled' : 'Disabled';
+        serverPyRunStatus.title = pyRun ? 'Enabled (via server flag --enable-python-run)' : 'Disabled';
+        serverPyRunStatus.classList.toggle('status-true', pyRun);
+        serverPyRunStatus.classList.toggle('status-false', !pyRun);
+
+        const shRun = details.auto_run_shell === true;
+        serverShRunStatus.textContent = shRun ? 'Enabled' : 'Disabled';
+        serverShRunStatus.title = shRun ? 'Enabled (via server flag --shell)' : 'Disabled';
+        serverShRunStatus.classList.toggle('status-true', shRun); // Maybe use warning class instead?
+        serverShRunStatus.classList.toggle('status-false', !shRun);
+        if (shRun) serverShRunStatus.classList.add('status-false'); // Use red style for dangerous enabled shell
+
+        // REMOVED logic updating toggle controls
+        // serverEnablePython.checked = details.auto_run_python || false;
+        // serverEnableShell.checked = details.auto_run_shell || false;
+        // serverEnablePython.disabled = false;
+        // serverEnableShell.disabled = false;
     }
 
      // --- Helper to get current tab ID ---
@@ -64,10 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
     // --- Initialization ---
-
-    // Disable server config toggles until status is fetched
-    serverEnablePython.disabled = true;
-    serverEnableShell.disabled = true;
 
     displayStatus('Loading settings...');
 
@@ -188,7 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Activation Toggle Change (Remains Global)
+    // Activation Toggle listener remains the same
     activationToggle.addEventListener('change', () => {
         const isActive = activationToggle.checked;
         browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
@@ -200,55 +215,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
     });
 
-
-    // Server Config Toggles Change (Target server based on this tab's stored port)
-    async function handleConfigToggleChange(settingKey, isEnabled) {
-        if (currentTabId === null) {
-            displayStatus('Cannot update config - current tab ID unknown.', 'error');
-            return false; // Indicate failure to caller
-        }
-        const settingLabel = settingKey === 'auto_run_python' ? 'Python' : 'Shell';
-        const statusType = (settingKey === 'auto_run_shell' && isEnabled) ? 'warning' : 'info';
-        displayStatus(`Sending ${settingLabel} auto-run (${isEnabled}) to server for this tab...`, statusType);
-
-        try {
-            // Background script will use getPortForTab(senderTabId) to find the right server
-            const response = await browser.runtime.sendMessage({
-                action: "updateConfig",
-                // No need to send tabId, background uses sender.tab.id
-                settings: { [settingKey]: isEnabled }
-            });
-            if (response && response.success) {
-                 const finalStatusType = (settingKey === 'auto_run_shell' && isEnabled) ? 'warning' : 'success';
-                displayStatus(response.details.message || `${settingLabel} auto-run for this tab ${isEnabled ? 'enabled' : 'disabled'}.`, finalStatusType);
-                console.log("Popup: Update config success:", response.details);
-                return true;
-            } else {
-                displayStatus(`Failed to update ${settingLabel} auto-run: ${response?.details?.message || 'Unknown error'}`, 'error');
-                 console.error("Popup: Update config failed:", response?.details);
-                 return false;
-            }
-        } catch (error) {
-             displayStatus(`Error updating ${settingLabel} auto-run: ${error.message}`, 'error');
-             console.error("Popup: Error sending updateConfig message:", error);
-             return false;
-        }
-    }
-
-    serverEnablePython.addEventListener('change', async (event) => {
-        const isEnabled = event.target.checked;
-        event.target.disabled = true;
-        const success = await handleConfigToggleChange('auto_run_python', isEnabled);
-        if (!success) event.target.checked = !isEnabled; // Revert UI on failure
-        event.target.disabled = false;
-    });
-
-    serverEnableShell.addEventListener('change', async (event) => {
-        const isEnabled = event.target.checked;
-         event.target.disabled = true;
-         const success = await handleConfigToggleChange('auto_run_shell', isEnabled);
-         if (!success) event.target.checked = !isEnabled; // Revert UI on failure
-         event.target.disabled = false;
-     });
+    // REMOVED Event listeners for server config toggles
+    // serverEnablePython.addEventListener(...)
+    // serverEnableShell.addEventListener(...)
 
 });

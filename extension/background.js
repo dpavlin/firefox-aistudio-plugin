@@ -2,6 +2,7 @@
 // Default server port
 const DEFAULT_PORT = 5000;
 const STORAGE_TAB_PORTS_KEY = 'tabServerPorts'; // Key for the object storing ports per tab
+const STORAGE_BLOCK_STATUS_KEY = 'tabBlockStatuses'; // Key for object storing block statuses per tab {tabId: {hash: status}}
 const STORAGE_ACTIVE_KEY = 'extensionActive';
 
 // --- Helper Functions ---
@@ -10,68 +11,91 @@ const STORAGE_ACTIVE_KEY = 'extensionActive';
 async function getTabPortsObject() {
   try {
     let data = await browser.storage.local.get(STORAGE_TAB_PORTS_KEY);
-    // Return the stored object or an empty one if not found/invalid
     const portsObj = data?.[STORAGE_TAB_PORTS_KEY];
     if (typeof portsObj === 'object' && portsObj !== null) {
         return portsObj;
     }
-  } catch (error) {
-    console.error("Background: Error getting tab ports object:", error);
-  }
-  return {}; // Return empty object on error or if not found
+  } catch (error) { console.error("BG Error getting tab ports object:", error); }
+  return {};
 }
 
-// Gets the port for a specific tab ID, falling back to default
+// Gets the entire object mapping tab IDs to block statuses {tabId: {hash: status}}
+async function getBlockStatusObject() {
+    try {
+        let data = await browser.storage.local.get(STORAGE_BLOCK_STATUS_KEY);
+        const statusObj = data?.[STORAGE_BLOCK_STATUS_KEY];
+        if (typeof statusObj === 'object' && statusObj !== null) {
+            return statusObj;
+        }
+    } catch (error) { console.error("BG Error getting block status object:", error); }
+    return {};
+}
+
+// Gets the port for a specific tab ID
 async function getPortForTab(tabId) {
-    if (typeof tabId !== 'number') {
-        console.warn("Background: Invalid tabId received for getPortForTab, returning default.");
-        return DEFAULT_PORT;
-    }
+    // ... (remains the same as previous version) ...
+    if (typeof tabId !== 'number') return DEFAULT_PORT;
     const portsObj = await getTabPortsObject();
-    const port = parseInt(portsObj[tabId], 10); // Get port specifically for this tab
-    if (!isNaN(port) && port >= 1025 && port <= 65535) {
-        return port;
-    }
-    // console.log(`Background: No specific port found for tab ${tabId}, returning default ${DEFAULT_PORT}`);
-    return DEFAULT_PORT; // Fallback to default
+    const port = parseInt(portsObj[tabId], 10);
+    return (!isNaN(port) && port >= 1025 && port <= 65535) ? port : DEFAULT_PORT;
 }
 
 // Sets the port for a specific tab ID
 async function setPortForTab(tabId, port) {
-    if (typeof tabId !== 'number') {
-        console.error("Background: Invalid tabId received for setPortForTab.");
-        return false;
-    }
-    const portToStore = parseInt(port, 10);
-     if (isNaN(portToStore) || portToStore < 1025 || portToStore > 65535) {
-         console.warn(`Background: Invalid port ${port} received for storage for tab ${tabId}.`);
-         return false;
-     }
-
+    // ... (remains the same as previous version) ...
+     if (typeof tabId !== 'number') return false;
+     const portToStore = parseInt(port, 10);
+     if (isNaN(portToStore) || portToStore < 1025 || portToStore > 65535) return false;
     try {
         const portsObj = await getTabPortsObject();
-        portsObj[tabId] = portToStore; // Update or add the port for this tab
+        portsObj[tabId] = portToStore;
         await browser.storage.local.set({ [STORAGE_TAB_PORTS_KEY]: portsObj });
-        console.log(`Background: Stored port ${portToStore} for tab ${tabId}`);
+        console.log(`BG: Stored port ${portToStore} for tab ${tabId}`);
+        return true;
+    } catch (error) { console.error(`BG Error storing port ${portToStore} for tab ${tabId}:`, error); return false; }
+}
+
+// Gets status for a specific block hash in a specific tab
+async function getBlockStatus(tabId, blockHash) {
+    if (typeof tabId !== 'number' || !blockHash) return null; // Invalid input
+    try {
+        const statusObject = await getBlockStatusObject();
+        return statusObject[tabId]?.[blockHash] || null; // Return status or null if not found
+    } catch (error) {
+        console.error(`BG Error getting status for hash ${blockHash} in tab ${tabId}:`, error);
+        return null; // Return null on error
+    }
+}
+
+// Sets status for a specific block hash in a specific tab
+async function setBlockStatus(tabId, blockHash, status) {
+    if (typeof tabId !== 'number' || !blockHash || !status) return false;
+    try {
+        const statusObject = await getBlockStatusObject();
+        if (!statusObject[tabId]) {
+            statusObject[tabId] = {}; // Initialize object for the tab if it doesn't exist
+        }
+        statusObject[tabId][blockHash] = status; // Set the status ('pending', 'sent', 'error')
+        await browser.storage.local.set({ [STORAGE_BLOCK_STATUS_KEY]: statusObject });
+        console.log(`BG: Set status for hash ${blockHash} in tab ${tabId} to ${status}`);
         return true;
     } catch (error) {
-        console.error(`Background: Error storing port ${portToStore} for tab ${tabId}:`, error);
+        console.error(`BG Error setting status for hash ${blockHash} in tab ${tabId}:`, error);
         return false;
     }
 }
 
-// Activation state remains global for simplicity
+
+// Activation state remains global
 async function getActivationState() {
-    try {
+     try {
         let data = await browser.storage.local.get(STORAGE_ACTIVE_KEY);
-        // Default to true if not set
-        return data?.[STORAGE_ACTIVE_KEY] !== false;
+        return data?.[STORAGE_ACTIVE_KEY] !== false; // Default to active
     } catch (error) {
         console.error("Background: Error getting activation state:", error);
         return true; // Default to active on error
     }
-}
-
+ }
 async function storeActivationState(isActive) {
      const stateToStore = isActive === true;
      try {
@@ -82,7 +106,7 @@ async function storeActivationState(isActive) {
          console.error(`Background: Error storing activation state ${stateToStore}:`, error);
          return false;
      }
-}
+ }
 
 // --- Main Message Listener ---
 browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
@@ -91,21 +115,20 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
   // --- Port Management ---
   if (request.action === "getPort") {
-      // Use the tabId from the request OR the sender if not provided (popup should provide)
-      const tabIdToGet = request.tabId ?? senderTabId;
-      if (typeof tabIdToGet !== 'number') {
-          console.error("Background: Cannot get port - invalid tab ID.");
-          return Promise.resolve({ port: DEFAULT_PORT }); // Send default on error
-      }
-      const port = await getPortForTab(tabIdToGet);
-      console.log(`Background: Responding to getPort for tab ${tabIdToGet} with: ${port}`);
-      return Promise.resolve({ port: port });
+        const tabIdToGet = request.tabId ?? senderTabId;
+        if (typeof tabIdToGet !== 'number') {
+             console.error("BG: Cannot get port - invalid tab ID.");
+             return Promise.resolve({ port: DEFAULT_PORT }); // Send default on error
+        }
+        const port = await getPortForTab(tabIdToGet);
+        console.log(`BG: Responding to getPort for tab ${tabIdToGet} with: ${port}`);
+        return Promise.resolve({ port: port });
   }
   else if (request.action === "storePort") {
       // Use the tabId from the request (popup MUST provide this)
        const tabIdToSet = request.tabId;
        if (typeof tabIdToSet !== 'number') {
-           console.error("Background: Cannot store port - invalid tab ID provided in request.");
+           console.error("BG: Cannot store port - invalid tab ID provided in request.");
            return Promise.resolve({ success: false, message: "Invalid tab ID" });
        }
       const success = await setPortForTab(tabIdToSet, request.port);
@@ -114,35 +137,53 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
   // --- Activation State Management (Remains Global) ---
   else if (request.action === "getActivationState") {
         const isActive = await getActivationState();
-        console.log(`Background: Responding to getActivationState with: ${isActive}`);
+        console.log(`BG: Responding to getActivationState with: ${isActive}`);
         return Promise.resolve({ isActive: isActive });
    }
    else if (request.action === "storeActivationState") {
         const success = await storeActivationState(request.isActive);
         return Promise.resolve({ success: success });
     }
+
+  // --- Block Status Management (NEW) ---
+  else if (request.action === "getBlockStatus") {
+       if (typeof senderTabId !== 'number' || !request.hash) {
+           console.error("BG: Invalid getBlockStatus request", request);
+           return Promise.resolve({ status: null });
+       }
+       const status = await getBlockStatus(senderTabId, request.hash);
+       // console.log(`BG: Responding to getBlockStatus for hash ${request.hash} in tab ${senderTabId} with: ${status}`);
+       return Promise.resolve({ status: status });
+   }
+   else if (request.action === "setBlockStatus") {
+        if (typeof senderTabId !== 'number' || !request.hash || !request.status) {
+            console.error("BG: Invalid setBlockStatus request", request);
+            return Promise.resolve({ success: false });
+        }
+        const success = await setBlockStatus(senderTabId, request.hash, request.status);
+        return Promise.resolve({ success: success });
+    }
+
   // --- Server Interaction ---
   else if (request.action === "submitCode") {
     const isActive = await getActivationState();
     if (!isActive) {
         console.log("Background: Extension inactive, ignoring submitCode.");
-         // Send specific inactive status back
          return Promise.resolve({ success: false, details: { status: 'inactive', message: 'Extension is currently inactive.' } });
     }
      if (typeof senderTabId !== 'number') {
          console.error("Background: Cannot submit code - sender tab ID missing.");
          return Promise.resolve({ success: false, details: { status: 'error', message: 'Missing sender tab ID.' } });
      }
-    if (!request.code) {
-      console.error("Background: Received submitCode request with no code.");
-      return Promise.resolve({ success: false, details: { status: 'error', message: 'No code provided in message.' } });
+    if (!request.code || !request.hash) { // Ensure hash is included
+      console.error("BG: submitCode request missing code or hash.", request);
+      return Promise.resolve({ success: false, details: { status: 'error', message: 'Missing code or hash in submitCode request.' } });
     }
 
     try {
-      // *** Use the port specific to the sender tab ***
       const port = await getPortForTab(senderTabId);
       const url = `http://127.0.0.1:${port}/submit_code`;
-      console.log(`Background: Sending code from tab ${senderTabId} to ${url}`);
+      console.log(`BG: Sending code from tab ${senderTabId} to ${url} (Hash: ${request.hash})`);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -150,16 +191,21 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
         body: JSON.stringify({ code: request.code })
       });
 
+      // IMPORTANT: Update block status storage after server response
+      let serverResponseData = null;
+      let fetchSuccess = false;
       if (!response.ok) {
-          console.error(`Background: Server responded to /submit_code with status ${response.status} ${response.statusText}`);
+          console.error(`BG: Server responded to /submit_code with status ${response.status} ${response.statusText}`);
           const errorText = await response.text().catch(() => `Server returned status ${response.status}`);
-           return Promise.resolve({ success: false, details: { status: 'error', message: `Server error: ${response.status} ${response.statusText}`, server_response: errorText } });
+          await setBlockStatus(senderTabId, request.hash, 'error'); // Mark as error in storage
+          return Promise.resolve({ success: false, details: { status: 'error', message: `Server error: ${response.status} ${response.statusText}`, server_response: errorText } });
+      } else {
+          serverResponseData = await response.json();
+          fetchSuccess = serverResponseData.status === 'success';
+          await setBlockStatus(senderTabId, request.hash, fetchSuccess ? 'sent' : 'error'); // Mark as sent/error
+          console.log("BG: Received response from server for /submit_code:", serverResponseData);
+          return Promise.resolve({ success: fetchSuccess, details: serverResponseData });
       }
-
-      const data = await response.json();
-      console.log("Background: Received response from server for /submit_code:", data);
-      // Ensure top-level success reflects server status
-      return Promise.resolve({ success: data.status === 'success', details: data });
 
     } catch (error) {
       console.error("Background: Error fetching /submit_code:", error);
@@ -170,6 +216,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
        } else if (error instanceof Error) {
            errorMessage = error.message;
        }
+       await setBlockStatus(senderTabId, request.hash, 'error'); // Mark as error on exception
        return Promise.resolve({ success: false, details: { status: 'error', message: errorMessage } });
     }
   }
@@ -182,7 +229,7 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
           }
           const url = `http://127.0.0.1:${port}/test_connection`;
           console.log(`Background: Testing connection to ${url} (requested by popup)`);
-          const response = await fetch(url, {cache: "no-store"}); // Prevent caching
+          const response = await fetch(url, {cache: "no-store"});
           if (!response.ok) {
                // Try to get more details if possible
                const errorText = await response.text().catch(() => `Server returned status ${response.status}`);
@@ -198,19 +245,32 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
       }
   }
    else if (request.action === "updateConfig") {
-        // Config updates should target the server instance relevant to the CURRENT tab
+        // NOTE: This action is no longer triggered by the current popup UI,
+        // but keeping handler structure in case other config options are added later.
         if (typeof senderTabId !== 'number') {
             console.error("Background: Cannot update config - sender tab ID missing.");
             return Promise.resolve({ success: false, details: { message: 'Missing sender tab ID.' } });
         }
        try {
-            const port = await getPortForTab(senderTabId); // Use port associated with the sending tab
+            const port = await getPortForTab(senderTabId);
             const url = `http://127.0.0.1:${port}/update_config`;
-            console.log(`Background: Sending config update for tab ${senderTabId} to ${url}`, request.settings);
+            // Filter settings to only include relevant ones if needed in future
+            const settingsToSend = {};
+            if (request.settings && request.settings.hasOwnProperty('port')) { // Example if port could be set this way
+                 settingsToSend.port = request.settings.port;
+            }
+            // ** REMOVED auto_run_python / auto_run_shell handling **
+
+             if (Object.keys(settingsToSend).length === 0) {
+                 console.log("Background: No relevant settings found in updateConfig request.");
+                 return Promise.resolve({ success: true, details: { message: "No applicable settings to update.", status: "info"} });
+             }
+
+            console.log(`Background: Sending config update for tab ${senderTabId} to ${url}`, settingsToSend);
             const response = await fetch(url, {
                  method: 'POST',
                  headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                 body: JSON.stringify(request.settings || {})
+                 body: JSON.stringify(settingsToSend) // Send only relevant settings
             });
              if (!response.ok) {
                  const errorText = await response.text().catch(() => `Server returned status ${response.status}`);
@@ -218,7 +278,6 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
              }
              const data = await response.json();
              console.log("Background: Config update response:", data);
-             // Ensure top-level success reflects server status
              return Promise.resolve({ success: data.status === 'success', details: data });
          } catch (error) {
              console.error("Background: Update config failed:", error);
@@ -229,24 +288,33 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
   // Default fallback if action not handled
   console.warn(`Background: Unhandled message action: ${request.action}`);
-  // Return a promise resolving to an error structure
-  return Promise.resolve({ success: false, details: { status: 'error', message: `Unhandled action: ${request.action}` }});
+  return Promise.resolve({ success: false, details: { message: `Unhandled action: ${request.action}` }});
 
 });
 
 // --- Tab Close Listener ---
 browser.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+    console.log(`BG: Tab ${tabId} removed. Cleaning up storage.`);
     try {
+        // Clean up port storage
         const portsObj = await getTabPortsObject();
         if (portsObj.hasOwnProperty(tabId)) {
             delete portsObj[tabId];
             await browser.storage.local.set({ [STORAGE_TAB_PORTS_KEY]: portsObj });
-            console.log(`Background: Removed port setting for closed tab ${tabId}`);
+            console.log(`BG: Removed port setting for closed tab ${tabId}`);
         }
+        // Clean up block status storage
+        const statusObject = await getBlockStatusObject();
+         if (statusObject.hasOwnProperty(tabId)) {
+             delete statusObject[tabId];
+             await browser.storage.local.set({ [STORAGE_BLOCK_STATUS_KEY]: statusObject });
+             console.log(`BG: Removed block statuses for closed tab ${tabId}`);
+         }
     } catch (error) {
-        console.error(`Background: Error removing port setting for closed tab ${tabId}:`, error);
+        console.error(`BG: Error cleaning storage for closed tab ${tabId}:`, error);
     }
 });
 
 
-console.log("AI Code Capture: Background script loaded (Tab-local ports enabled).");
+console.log("AI Code Capture: Background script loaded (Tab-local ports, Tab-local block status).");
+
