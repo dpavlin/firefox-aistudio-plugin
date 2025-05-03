@@ -83,53 +83,41 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
     // --- Initialization ---
-
     displayStatus('Loading settings...');
-
-    // 0. Get current tab ID first
     currentTabId = await getCurrentTabId();
+    // ... (rest of initialization for port and activation state remains the same) ...
     if (currentTabId === null) {
          displayStatus('Error: Could not identify the current tab. Port settings might not work correctly.', 'error');
-         // Proceed with defaults, but things might be broken
     } else {
         console.log(`Popup: Initializing for tab ID: ${currentTabId}`);
+        try {
+            const portResponse = await browser.runtime.sendMessage({ action: "getPort", tabId: currentTabId });
+            const initialPort = portResponse?.port || DEFAULT_PORT;
+            serverPortInput.value = initialPort;
+            console.log(`Popup: Initial port for tab ${currentTabId} set to ${initialPort}`);
+        } catch (error) {
+            console.error(`Popup: Error getting initial port for tab ${currentTabId}:`, error);
+            serverPortInput.value = DEFAULT_PORT; // Fallback
+            displayStatus(`Error loading port for this tab: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
+         }
     }
-
-
-    // 1. Fetch and set initial port value for THIS tab
-    try {
-        // **Send tabId with the request**
-        const portResponse = await browser.runtime.sendMessage({ action: "getPort", tabId: currentTabId });
-        const initialPort = portResponse?.port || DEFAULT_PORT;
-        serverPortInput.value = initialPort;
-        console.log(`Popup: Initial port for tab ${currentTabId} set to ${initialPort}`);
-    } catch (error) {
-        console.error(`Popup: Error getting initial port for tab ${currentTabId}:`, error);
-        serverPortInput.value = DEFAULT_PORT; // Fallback
-        displayStatus(`Error loading port for this tab: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
-    }
-
-    // 2. Fetch and set initial GLOBAL activation state (remains global)
-    try {
-        const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
-        activationToggle.checked = activationResponse?.isActive === true;
-        console.log(`Popup: Initial global activation state: ${activationToggle.checked}`);
-    } catch (error) {
+     try {
+         const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
+         activationToggle.checked = activationResponse?.isActive === true;
+         console.log(`Popup: Initial global activation state: ${activationToggle.checked}`);
+     } catch (error) {
         console.error("Popup: Error getting initial activation state:", error);
         activationToggle.checked = false; // Default to inactive on error
         displayStatus(`Error loading activation state: ${error.message}.`, 'warning');
-    }
+      }
 
-    // 3. Attempt initial connection test (using the potentially tab-specific port now loaded)
-     if (currentTabId !== null) { // Only test if we have a tab ID
-        testConnectionBtn.click(); // Trigger test on load
-     } else {
-         displayStatus("Cannot perform initial connection test without Tab ID.", "warning");
-     }
+     if (currentTabId !== null) { testConnectionBtn.click(); }
+     else { displayStatus("Cannot perform initial connection test without Tab ID.", "warning"); }
+
 
     // --- Event Listeners ---
 
-    // Validate and Store Port on Input
+    // Port input listener remains the same
     serverPortInput.addEventListener('input', () => {
         if (currentTabId === null) {
             displayStatus('Cannot save port setting - current tab ID unknown.', 'error');
@@ -155,10 +143,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             serverPortInput.classList.add('invalid');
         }
         // Show restart warning if port differs from default (simplistic check)
-        restartWarning.style.display = (portValue !== '' && portNumber !== DEFAULT_PORT) ? 'block' : 'none';
+        // Also check against current value to avoid showing warning unnecessarily if default is typed
+        const currentPortValue = parseInt(serverPortInput.value, 10); // Re-parse
+        restartWarning.style.display = (isValid && portValue !== '' && currentPortValue !== DEFAULT_PORT) ? 'block' : 'none';
     });
 
-    // Test Connection Button
+    // Test Connection listener remains the same
     testConnectionBtn.addEventListener('click', async () => {
         // Tests the *currently entered* port, not necessarily the stored one for the tab
         const currentInputPort = parseInt(serverPortInput.value, 10);
@@ -216,7 +206,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // REMOVED Event listeners for server config toggles
-    // serverEnablePython.addEventListener(...)
-    // serverEnableShell.addEventListener(...)
 
 });

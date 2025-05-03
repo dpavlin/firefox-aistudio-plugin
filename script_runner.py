@@ -136,3 +136,4 @@ def check_shell_syntax(filepath: str) -> tuple[bool, str | None, str | None]:
         # log_content += err_msg # Removed
         # _write_log(logpath, log_content); # Removed
         return False, None, f"Unexpected error during syntax check: {e}"
+

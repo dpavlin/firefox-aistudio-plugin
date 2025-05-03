@@ -10,7 +10,7 @@
 6.  **Verify that** if changes occur to the text content within a monitored code block while its stabilization timer is running, the timer is correctly reset in `extension/content.js`.
 7.  **Verify that** if the `@@FILENAME@@` marker is removed from a block while its timer is pending, the pending highlight is removed, and the block is not sent to the server.
 8.  **Verify that** once the stabilization timer completes successfully, the pending highlight is removed, and a temporary processing highlight (`.aicapture-highlight`) is applied while the request is sent to `extension/background.js`.
-9.  **Verify that** each specific code block (identified by its content hash within a tab) is processed and sent to the server **only once**, using per-tab persistent storage (`browser.storage.local`) managed by `extension/background.js`.
+9.  **Verify that** each specific `<ms-code-block>` element is processed and sent to the server **only once** per page load (achieved by using persistent hashing and status checks via `extension/background.js`).
 10. **Verify that** after server processing, the highlight on the `<ms-code-block>` changes to green (`.aicapture-success`) or red (`.aicapture-error`) based on the server's response.
 11. **Verify that** the final success or error highlight applied to a code block **remains visible indefinitely** (no fade-out or automatic removal).
 12. **Verify that** the `MutationObserver` in `extension/content.js` listens for `characterData` changes to correctly detect modifications within code blocks during generation.
@@ -18,16 +18,16 @@
 
 **II. Background Script & Communication**
 
-14. **Verify that** the `extension/background.js` script correctly receives `submitCode` messages from `extension/content.js`, including the code content and its hash.
+14. **Verify that** the `extension/background.js` script correctly receives `submitCode` messages from `extension/content.js`, including the code `hash`.
 15. **Verify that** `extension/background.js` retrieves the correct server port associated with the *sending tab's ID* from storage before sending a `submitCode` request.
 16. **Verify that** `extension/background.js` correctly sends the code to the backend server's `/submit_code` endpoint (on `server.py`) with the `Content-Type: application/json` header and a properly stringified JSON body (`{ "code": "..." }`).
 17. **Verify that** `extension/background.js` handles potential network errors or non-JSON responses from the server gracefully and relays an appropriate error status back to `extension/content.js`.
 18. **Verify that** `extension/background.js` correctly relays the success/failure status and other details (including execution output if applicable) received from the server back to the calling `extension/content.js`.
 19. **Verify that** `extension/background.js` checks the global activation state before processing a `submitCode` message and sends an "inactive" status back if the extension is disabled.
-20. **Verify that** `extension/background.js` handles `getPort`, `storePort`, `getActivationState`, `storeActivationState`, `getBlockStatus`, and `setBlockStatus` messages correctly, interacting with `browser.storage.local` and using the appropriate tab ID for port/status operations.
+20. **Verify that** `extension/background.js` handles `getPort`, `storePort`, `getActivationState`, `storeActivationState`, `getBlockStatus`, and `setBlockStatus` messages correctly, interacting with `browser.storage.local` and using the appropriate tab ID and block hash.
 21. **Verify that** the `testConnection` message handler in `extension/background.js` uses the specific `port` number provided in the message payload for the fetch request to the server's `/test_connection` endpoint.
 22. **Verify that** the `updateConfig` message handler in `extension/background.js` (if used for future settings) uses the port associated with the *sender tab* to target the correct server instance's `/update_config` endpoint.
-23. **Verify that** `extension/background.js` includes a listener (`tabs.onRemoved`) that cleans up the stored port setting *and* the block status object for a tab when it is closed.
+23. **Verify that** `extension/background.js` includes a listener (`tabs.onRemoved`) that cleans up the stored port setting *and block statuses* for a tab when it is closed.
 
 **III. Backend Server Processing (Python)**
 
@@ -37,9 +37,9 @@
 27. **Verify that** the backend correctly sanitizes the filename extracted from the marker using `utils.py::sanitize_filename`, rejecting invalid paths (e.g., absolute, containing `..`, hidden segments) and appending `.txt` if no valid extension exists.
 28. **Verify that** if filename sanitization fails, the backend (`routes/submit.py`) reverts to using the original (BOM-stripped) code content for fallback saving.
 29. **Verify that** if no valid marker is found on the first line, the backend (`routes/submit.py`) uses the original (BOM-stripped) code content for fallback processing.
-30. **Verify that** the backend (`routes/submit.py`) correctly strips the optional `--- END OF @@FILENAME@@ ... ---` marker line from the end of the code before saving.
-31. **Verify that** the server (`routes/submit.py`) correctly determines the save target ("git", "fallback_named", "fallback") based on the marker validity, sanitization result, repo status, and file tracking status (using functions from `file_handler.py`).
-32. **Verify that** for tracked files in a Git repo, the backend (`file_handler.py`) only commits if the new (stripped) content is different from the existing file content.
+30. **Verify that** the server (`routes/submit.py`) correctly determines the save target ("git", "fallback_named", "fallback") based on the marker validity, sanitization result, repo status, and file tracking status (using functions from `file_handler.py`).
+31. **Verify that** for tracked files in a Git repo, the backend (`file_handler.py`) only commits if the new (stripped) content is different from the existing file content.
+32. **Verify that** the server (`routes/submit.py`) correctly strips the optional `--- END OF @@FILENAME@@ ... ---` marker from the end of the code before saving.
 33. **Verify that** the server correctly generates timestamped filenames in the `received_codes/` directory during fallback scenarios using `utils.py::generate_timestamped_filepath`.
 34. **Verify that** the server (`server.py`) uses a `threading.Lock` to process `/submit_code` requests sequentially, preventing race conditions.
 35. **Verify that** Flask Blueprints (from `routes/`) are correctly imported and registered in `server.py`, and that the `logs_bp` is no longer registered.
@@ -71,3 +71,4 @@
 52. **Verify that** the `/update_config` endpoint (`routes/config_routes.py`) now only accepts and saves the 'port' setting to `server_config.json`.
 53. **Verify that** the server startup message in `server.py` accurately reflects the *effective running settings*, noting that auto-run is controlled by flags, and no longer mentions a log directory.
 54. **Verify that** the `logs/` directory is no longer automatically created by `config_manager.py`.
+

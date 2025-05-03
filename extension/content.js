@@ -72,7 +72,6 @@ function removeAllHighlights(element) {
         element.classList.remove(
             'aicapture-highlight', 'aicapture-pending',
             'aicapture-success', 'aicapture-error'
-            // No fadeout class anymore
         );
     }
 }
@@ -140,16 +139,15 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
     if (!highlightTarget || !codeElement) return;
 
     const codeContent = codeElement.textContent || '';
-    // Calculate hash regardless of marker presence to clear potential old timers/status
-    const blockHash = hashCode(codeContent);
+    const blockHash = hashCode(codeContent); // Calculate hash regardless of marker for now
 
     if (!codeContent.trimStart().startsWith(FILENAME_MARKER)) {
-        // Marker not present (or removed) - ensure no timer and no highlight for this specific hash
+        // Marker not present (or removed) - ensure no timer and no highlight
         if (stabilizationTimers.has(blockHash)) {
             clearTimeout(stabilizationTimers.get(blockHash));
             stabilizationTimers.delete(blockHash);
         }
-        // Check stored status - if it was pending for this hash, clear it. Don't clear sent/error.
+        // Check stored status - if it was pending, clear it. Don't clear sent/error.
         const storedStatus = await getStoredStatus(blockHash);
         if (storedStatus === 'pending') {
              await setStoredStatus(blockHash, null); // Clear pending status
@@ -161,7 +159,7 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
         return;
     }
 
-    // Marker is present, proceed.
+    // Marker is present, proceed...
 
     // Check persistent storage - don't process if already sent or errored
     const storedStatus = await getStoredStatus(blockHash);
@@ -191,12 +189,12 @@ async function resetStabilizationTimer(highlightTarget, codeElement) {
     // Add the pending highlight (ensure others removed)
     removeAllHighlights(highlightTarget);
     highlightTarget.classList.add('aicapture-pending');
-    // Mark as pending in storage
-    await setStoredStatus(blockHash, 'pending');
+    // Optionally mark as pending in storage (can cause extra writes)
+    // await setStoredStatus(blockHash, 'pending');
 
     // Start a new timer
     const timerId = setTimeout(async () => {
-        // Timer completed, proceed to send (sendCodeToServer handles final status check)
+        // Timer completed without being reset, proceed to send (sendCodeToServer handles final status check)
         stabilizationTimers.delete(blockHash); // Remove from timer map first
         await sendCodeToServer(highlightTarget, codeElement, blockHash);
     }, STABILIZATION_DELAY_MS);
@@ -223,7 +221,6 @@ const debouncedScan = debounce(scanForCodeBlocks, OBSERVER_DEBOUNCE_MS);
 
 // --- Mutation Observer ---
 const observer = new MutationObserver(mutations => {
-    // ... (Observer logic to detect relevant changes remains the same) ...
     let potentiallyRelevant = false;
     for (const mutation of mutations) {
         // Check added nodes
@@ -252,6 +249,7 @@ const observer = new MutationObserver(mutations => {
 
         if (potentiallyRelevant) break;
     }
+
     if (potentiallyRelevant) {
         // console.log("AICapture: Relevant mutation detected, queueing debounced scan.");
         debouncedScan();
@@ -269,4 +267,4 @@ observer.observe(document.body, {
 
 // Initial scan on load
 console.log("AICapture: Performing initial scan.");
-debouncedScan(); // Use the debounced version for initial scan too
+debouncedScan();

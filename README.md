@@ -1,6 +1,6 @@
 # AI Code Capture
 
-Firefox plugin for Google AI Studio integration with local file system 
+Firefox plugin for Google AI Studio integration with local file system
 
 ## Motivation
 
@@ -18,11 +18,12 @@ sudo apt install python3-flask python3-flask-cors
 
 ```bash
 # Navigate to your project's root directory first
-python3 server.py [--port <port_number>] [--enable-python-run] [--shell]
+# Auto-run is controlled *only* by flags now
+python3 server.py [--port <port_number>] [--shell] [--enable-python-run]
 ```
-*Default port is 5000.*
-*Use `--enable-python-run` to allow execution of received Python files.*
-*Use `--shell` (DANGEROUS) to allow execution of received Shell scripts.*
+*   Default port is 5000.
+*   `--shell`: DANGEROUS! Enables automatic execution of received Shell scripts.
+*   `--enable-python-run`: Enables automatic execution of received Python scripts.
 
 ## Load Temporary Add-on in Firefox
 
@@ -44,21 +45,7 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 ## Google AI Studio Prompt Instructions
 
-**Crucial:** Instruct the AI how to format its output. Include this in your prompt (or load from `prompt.txt`):
-
-> **CRUCIAL INSTRUCTIONS FOR CODE BLOCK FORMATTING:**
->
-> 1.  **Show Full Content:** When you are asked to show the modified content of a file, ALWAYS provide the *complete* file content in the code block.
-> 2.  **Mandatory Filename Marker:** You **MUST** include a filename marker at the very beginning of the code block.
-> 3.  **Marker Format:** The marker format is *exactly*:
->     `@@FILENAME@@ path/relative/to/project/root.ext`
->     *(Replace `path/relative/to/project/root.ext` with the correct file path relative to the project root.)*
-> 4.  **Strict First Line Placement:** The `@@FILENAME@@` marker **MUST** be on the **VERY FIRST LINE** of the code block.
-> 5.  **No Prefix:** Do **NOT** put *anything* before the `@@FILENAME@@` marker on the first line (no comments like `//` or `#`, no code, nothing except optional leading whitespace which is ignored).
-> 6.  **Code Starts on Line 2:** The actual code content of the file **MUST** begin on the second line.
-> 7.  **(Optional) End Marker:** For clarity in our chat, you *may* add a separator line after the *entire* code block, like `--- END OF @@FILENAME@@ path/to/file.ext ---`.
->
-> **Why is this important?** An automated tool reads your code blocks. It *strictly* expects the `@@FILENAME@@` marker on the first line to identify the file and removes that line before saving. Any deviation will cause errors.
+**Crucial:** Instruct the AI how to format its output. Use the content of `prompt.txt` in your prompt.
 
 ## Git Integration
 
@@ -68,8 +55,4 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 ## Multiple Projects in Separate Tabs
 
 *   Use the server's `--port <number>` option to run multiple instances on different ports for different projects.
-*   Configure the matching port number in the extension popup **for each corresponding AI Studio tab**. The port setting is tab-specific.
-
-## Execution Output
-
-*   If `--enable-python-run` or `--shell` flags are used, the stdout/stderr from script execution is **not** saved to a file but is included in the JSON response sent back to the extension after a `/submit_code` request. This output is not currently displayed in the popup UI.
+*   Configure the matching port number in the extension popup for each corresponding AI Studio tab. The port setting is now tab-specific.
