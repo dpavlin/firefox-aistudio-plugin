@@ -29,12 +29,13 @@ def check_dependencies():
 def get_files_list(codes_dir: Path) -> list[Path]:
     """Gets the list of latest file paths, sorted newest first."""
     try:
+        if not codes_dir.is_dir():
+             print(f"Warning: Directory '{codes_dir}' does not exist.", file=sys.stderr)
+             return []
         all_entries = list(codes_dir.iterdir())
         files = [p for p in all_entries if p.is_file()]
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True) # Sort newest first
         return files[:MAX_FILES]
-    except FileNotFoundError:
-        return []
     except OSError as e:
         print(f"Error listing directory '{codes_dir}': {e}", file=sys.stderr)
         return []
@@ -118,7 +119,7 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
         if key == curses.KEY_RESIZE:
              needs_redraw = True
              list_h = h - 2
-             key = 0
+             key = 0 # Reset key after handling resize
 
         # Scroll list if necessary
         if list_h > 0:
@@ -221,13 +222,35 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
 
 def view_file(filepath: Path):
     """Attempts to view the specified file using less."""
-    # (No changes needed in view_file)
-    if not shutil.which("less"): print(f"\nError: 'less' not found: {filepath}", file=sys.stderr); input("Press Enter..."); return
-    if not filepath.is_file(): print(f"\nError: Not a file: {filepath}", file=sys.stderr); input("Press Enter..."); return
+    if not shutil.which("less"):
+        print(f"\nError: 'less' command not found. Cannot view: {filepath}", file=sys.stderr)
+        input("Press Enter to continue...")
+        return
+    if not filepath.is_file():
+        print(f"\nError: Not a file: {filepath}", file=sys.stderr)
+        input("Press Enter to continue...")
+        return
     print(f"\nViewing '{filepath.name}' with less... (Press 'q' to quit less)", file=sys.stderr)
-    try: subprocess.run(["less", str(filepath)], check=False)
-    except Exception as e: print(f"\nError running 'less': {e}", file=sys.stderr); input("Press Enter...")
-    finally: pass
+    try:
+        # Use curses.endwin() before calling subprocess and curses.doupdate() after
+        curses.endwin()
+        subprocess.run(["less", str(filepath)], check=False)
+    except Exception as e:
+        print(f"\nError running 'less': {e}", file=sys.stderr)
+        input("Press Enter to continue...")
+    finally:
+        # Ensure curses mode is restored if it was active
+        # This might need adjustment based on where view_file is called
+        try:
+            # Re-initialize screen if needed, or just update
+            stdscr = curses.initscr() # Reinitialize if endwin was called
+            stdscr.keypad(True)
+            curses.cbreak() # Or raw() depending on your needs
+            curses.noecho()
+            stdscr.refresh() # Force refresh after external command
+        except Exception as curse_err:
+            print(f"Error restoring curses: {curse_err}", file=sys.stderr)
+
 
 # --- Main Execution ---
 def main():
@@ -244,14 +267,40 @@ def main():
     codes_dir: Path = args.codes_dir.resolve()
     check_dependencies()
 
-    if not codes_dir.is_dir():
-        print(f"Error: Directory does not exist: {codes_dir}", file=sys.stderr); sys.exit(1)
+    if not codes_dir.is_dir() and not codes_dir.exists():
+        print(f"Error: Directory does not exist: {codes_dir}", file=sys.stderr)
+        # Optionally create it?
+        # try:
+        #     codes_dir.mkdir(parents=True)
+        #     print(f"Info: Created directory {codes_dir}", file=sys.stderr)
+        # except OSError as e:
+        #     print(f"Error: Could not create directory {codes_dir}: {e}", file=sys.stderr)
+        #     sys.exit(1)
+        # For now, exit if not found.
+        sys.exit(1)
+
 
     last_selection_index = 0
     while True:
         files = get_files_list(codes_dir)
-        if not files and not codes_dir.exists():
-             print(f"Error: Directory '{codes_dir}' disappeared.", file=sys.stderr); break
+        if not files:
+             # Handle case where directory exists but is empty
+             try:
+                def show_empty_message(stdscr):
+                    h, w = stdscr.getmaxyx()
+                    msg = f"No files found in '{codes_dir.name}'. Press any key."[:w-1]
+                    try: stdscr.addstr(h // 2, (w - len(msg)) // 2, msg)
+                    except curses.error: pass
+                    stdscr.refresh()
+                    stdscr.nodelay(False)
+                    stdscr.getch()
+                curses.wrapper(show_empty_message)
+                break # Exit if directory is empty after showing message
+             except curses.error as e:
+                  print(f"\nCurses error showing empty message: {e}", file=sys.stderr); break
+             except Exception as e:
+                  print(f"\nError showing empty message: {e}", file=sys.stderr); break
+
 
         selected_path = None
         try:
@@ -259,23 +308,43 @@ def main():
                 curses_selector, files, last_selection_index
             )
         except curses.error as e:
-             print(f"\nCurses error: {e}\nTerminal might be too small or incompatible.", file=sys.stderr); break
+             # Clean up curses state before printing error
+             try: curses.endwin()
+             except Exception: pass
+             print(f"\nCurses error: {e}\nTerminal might be too small or incompatible.", file=sys.stderr)
+             break
         except Exception as e:
-             print(f"\nError in selector loop: {e}", file=sys.stderr); break
+             try: curses.endwin()
+             except Exception: pass
+             print(f"\nError in selector loop: {e}", file=sys.stderr)
+             traceback.print_exc(file=sys.stderr) # Print full traceback for debugging
+             break
 
         if selected_path is None:
-            print("\nExiting.")
+            # No need to print exiting message if curses ended cleanly
             break
         else:
             view_file(selected_path)
 
 
 if __name__ == "__main__":
-    try: main()
-    except KeyboardInterrupt: print("\nOperation cancelled by user (Ctrl+C).")
-    except Exception as e: print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
-    finally:
-        try:
-             if sys.stdout.isatty(): curses.endwin()
+    try:
+        main()
+    except KeyboardInterrupt:
+        try: curses.endwin()
         except Exception: pass
-        sys.exit(0)
+        print("\nOperation cancelled by user (Ctrl+C).")
+    except Exception as e:
+        try: curses.endwin()
+        except Exception: pass
+        print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+    finally:
+        # Ensure curses is ended cleanly, even if main() didn't call wrapper
+        try:
+             if sys.stdout.isatty() and curses.isendwin() is False:
+                  curses.endwin()
+        except Exception: pass
+        # Use exit code 0 for normal exit (including Ctrl+C or 'q'), 1 for errors
+        sys.exit(0 if 'e' not in locals() or isinstance(e, KeyboardInterrupt) else 1)
+

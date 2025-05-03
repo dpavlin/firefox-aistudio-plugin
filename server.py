@@ -5,6 +5,7 @@ import sys
 import threading
 from flask import Flask
 from flask_cors import CORS
+import os # Added for exception check
 
 # Import configuration and route blueprints
 import config_manager
@@ -49,7 +50,8 @@ if __name__ == '__main__':
     print(f"--- AI Code Capture Server (Simplified) ---") # Updated Title
     if config['CONFIG_FILE'].is_file():
         print(f"Config File Path: '{config['CONFIG_FILE']}'")
-        print(f"  Config File Content: {config['loaded_file_config']}")
+        # Avoid printing potentially large configs unless debugging
+        # print(f"  Config File Content: {config['loaded_file_config']}")
     else:
         print(f"Config File Path: '{config['CONFIG_FILE']}' (Not Found, using defaults/args)")
     print("-" * 30)
@@ -73,11 +75,10 @@ if __name__ == '__main__':
 
     try:
         app.run(host=host_ip, port=port_num, debug=False)
-    # ... (exception handling remains the same) ...
     except OSError as e:
-        if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'): # Check os.name for Windows error code
+        if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'):
              print(f"\nE: Port {port_num} is already in use.", file=sys.stderr)
-             print(f"   Stop the other process or use '--port <new_port>'", file=sys.stderr) # Corrected argument suggestion
+             print(f"   Stop the other process or use '-p <new_port>'", file=sys.stderr)
              sys.exit(1)
         else: print(f"\nE: Failed to start server: {e}", file=sys.stderr); sys.exit(1)
     except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)

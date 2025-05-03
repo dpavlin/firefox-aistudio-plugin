@@ -94,6 +94,7 @@ def submit_code_route():
             # code_to_save remains original (BOM-stripped)
 
         # --- Determine Save Path (Git or Fallback) ---
+        # Logic remains the same as previous version...
         if marker_found_and_valid: # Use marker info ONLY if found and sanitized
             save_target = "try_git_or_named_fallback" # Tentative target
             if config['IS_REPO']:
@@ -135,30 +136,33 @@ def submit_code_route():
             save_target = "fallback"
 
 
-        # --- Strip Optional End Marker before Saving ---
+        # --- *** ADDED: Strip Optional End Marker before Saving *** ---
         original_code_to_save = code_to_save # Keep a copy for fallback naming if needed
         lines = code_to_save.splitlines()
-        last_line_index = -1
-        # Find the last line with actual content
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                last_line_index = i
-                break
+        if len(lines) > 0: # Check if there are any lines left after stripping marker
+            last_line_index = -1
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip():
+                    last_line_index = i
+                    break
 
-        if last_line_index != -1:
-            # Use regex for a more robust check of the end marker format
-            if END_MARKER_REGEX.match(lines[last_line_index]):
-                 print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
-                 # Reconstruct code excluding the marker line and potential empty lines after it
-                 code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
-                 # Add back a single trailing newline if the result is not empty
-                 if code_to_save:
-                     code_to_save += "\n"
-            else:
-                 # Ensure code ends with a single newline if it wasn't the marker
-                 code_to_save = code_to_save.rstrip() + "\n"
-        elif code_to_save: # Handle case where input might have only whitespace lines initially
-             code_to_save = "" # If no non-empty line found, result is empty
+            if last_line_index != -1:
+                # Use regex for a more robust check of the end marker format
+                if END_MARKER_REGEX.match(lines[last_line_index]):
+                     print(f"Info: Stripping end-of-file marker line: '{lines[last_line_index]}'", file=sys.stderr)
+                     # Reconstruct code excluding the marker line and potential empty lines after it
+                     code_to_save = "\n".join(lines[:last_line_index]).rstrip() # rstrip() to remove trailing whitespace/newlines from previous lines
+                     # Add back a single trailing newline if the result is not empty
+                     if code_to_save:
+                         code_to_save += "\n"
+                     else:
+                         # If stripping end marker left nothing, code_to_save is ""
+                          pass
+                else:
+                     # Ensure code ends with a single newline if it wasn't the marker
+                     code_to_save = code_to_save.rstrip() + "\n"
+            # If all lines were whitespace after stripping marker, code_to_save remains "" or whitespace
+
 
         # --- Handle Saving ---
         if save_target == "git":
@@ -187,6 +191,7 @@ def submit_code_route():
 
         else: # save_target == "fallback" (timestamped)
             # Use the language from the *original* code_to_save (before end marker strip)
+            # in case the end marker was the only thing left.
             ext_for_fallback, detected_language_name = detect_language_and_extension(original_code_to_save)
             base_name = "code"
             # Use sanitized filename part for prefix only if marker was valid originally
@@ -222,8 +227,9 @@ def submit_code_route():
         # Determine relative path for logging
         try:
             check_run_filepath_rel = Path(check_run_filepath).relative_to(config['SERVER_DIR']).as_posix()
-        except ValueError:
+        except ValueError: # Handle case where path might be outside server_dir somehow (shouldn't happen)
             check_run_filepath_rel = Path(check_run_filepath).name
+        # Print path type
         print(f"Info: Checking/Running {'Git' if save_target == 'git' else 'Fallback'} file: {check_run_filepath_rel}", file=sys.stderr)
 
 
@@ -233,52 +239,42 @@ def submit_code_route():
             if not is_server_script:
                 try:
                     saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
-                    # If code_to_save became empty after stripping, skip compile/run
-                    if not saved_code_content.strip():
-                        print("Info: Skipping check/run for effectively empty Python file.", file=sys.stderr)
-                        syntax_ok = True # Empty file is valid syntax
-                    else:
+                    # Check if there's actually code to compile
+                    if saved_code_content.strip():
                         compile(saved_code_content, check_run_filepath, 'exec')
                         syntax_ok = True
-                        # No separate syntax output for Python compile
-                        if config['auto_run_python']:
-                            print(f"Attempting auto-run for Python script: {check_run_filepath}", file=sys.stderr)
-                            # Capture output from run_script
-                            run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'python')
+                    else:
+                        syntax_ok = True # Treat empty file as syntactically ok
+                        print(f"Info: Python file '{check_run_filepath_rel}' is empty or whitespace only. Skipping run.", file=sys.stderr)
+                        run_success = True # Consider empty script as successful run (no-op)
+
+                    # No separate syntax output for Python compile
+                    if syntax_ok and config['auto_run_python'] and saved_code_content.strip():
+                        print(f"Attempting auto-run for Python script: {check_run_filepath}", file=sys.stderr)
+                        # Capture output from run_script
+                        run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'python')
                 except SyntaxError as py_syntax_e:
                     print(f"E: Python syntax error in '{check_run_filepath_rel}': {py_syntax_e}", file=sys.stderr)
                     syntax_ok = False; run_success = False
                     syntax_stderr = str(py_syntax_e) # Capture syntax error message
                 except Exception as py_compile_e:
                     print(f"E: Error compiling Python script '{check_run_filepath_rel}': {py_compile_e}", file=sys.stderr)
-                    syntax_ok = False; run_success = False
+                    syntax_ok = False; run_success = False # Treat compile errors as syntax false too
                     syntax_stderr = f"Compile error: {py_compile_e}"
             else:
                  print("W: Skipping syntax check/run for server script itself.", file=sys.stderr)
 
         elif file_extension == '.sh':
              script_type = 'shell'
-             # If code_to_save became empty after stripping, skip check/run
-             try:
-                 saved_code_content = Path(check_run_filepath).read_text(encoding='utf-8')
-                 if not saved_code_content.strip():
-                      print("Info: Skipping check/run for effectively empty Shell file.", file=sys.stderr)
-                      syntax_ok = True # Treat empty as okay
-                 else:
-                      print(f"Attempting syntax check for Shell script: {check_run_filepath}", file=sys.stderr)
-                      # Capture output from check_shell_syntax
-                      syntax_ok, syntax_stdout, syntax_stderr = check_shell_syntax(check_run_filepath)
-                      if syntax_ok:
-                          if config['auto_run_shell']:
-                               print(f"Attempting auto-run for Shell script: {check_run_filepath}", file=sys.stderr)
-                               # Capture output from run_script
-                               run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'shell')
-                      else: run_success = False # Syntax failed, so run must also fail
-             except Exception as read_e:
-                 print(f"E: Could not read shell script for check/run: {read_e}", file=sys.stderr)
-                 syntax_ok = False
-                 run_success = False
-                 syntax_stderr = f"Error reading file: {read_e}"
+             print(f"Attempting syntax check for Shell script: {check_run_filepath}", file=sys.stderr)
+             # Capture output from check_shell_syntax
+             syntax_ok, syntax_stdout, syntax_stderr = check_shell_syntax(check_run_filepath)
+             if syntax_ok:
+                  if config['auto_run_shell']:
+                       print(f"Attempting auto-run for Shell script: {check_run_filepath}", file=sys.stderr)
+                       # Capture output from run_script
+                       run_success, run_stdout, run_stderr = run_script(check_run_filepath, 'shell')
+             else: run_success = False # Syntax failed, so run must also fail
 
         # --- Prepare and send response ---
         response_data = {
@@ -293,7 +289,7 @@ def submit_code_route():
             'run_stdout': run_stdout, # ADDED
             'run_stderr': run_stderr, # ADDED
             'script_type': script_type,
-            'source_file_marker': extracted_filename_raw, # Original marker text if found and valid
+            'source_file_marker': extracted_filename_raw,
             'git_updated': was_git_updated,
             'save_location': save_target,
             'detected_language': detected_language_name
@@ -302,12 +298,12 @@ def submit_code_route():
         print("--- Request complete (inside lock) ---")
         return jsonify(response_data)
 
+    # ... (except and finally blocks remain the same) ...
     except Exception as e:
         print(f"E: Unhandled exception during /submit_code: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return jsonify({'status': 'error', 'message': f'Internal server error: {e}'}), 500
     finally:
-        # Ensure the lock is released even if errors occur
         if request_lock.locked():
              request_lock.release()
              print("--- Lock released ---", file=sys.stderr)
