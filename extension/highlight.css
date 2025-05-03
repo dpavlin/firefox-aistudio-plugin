@@ -44,52 +44,52 @@
   transition: outline 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
 }
 
-/* --- NEW Styles for Injected Output --- */
+/* --- Styles for Injected Output (Theme Inheriting) --- */
 .aicapture-output-container {
-  border: 1px solid #ccc;
-  background-color: #f9f9f9;
+  /* REMOVE explicit background-color */
+  /* Use a theme-agnostic border or remove it if it clashes */
+  border: 1px solid rgba(128, 128, 128, 0.3); /* Example: Semi-transparent grey */
   padding: 8px 12px;
-  margin-top: 8px; /* Space below the code block */
-  margin-bottom: 16px; /* Space before next potential block */
+  margin-top: 8px;
+  margin-bottom: 16px;
   border-radius: 4px;
-  font-size: 12px; /* Slightly smaller than main text */
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  font-size: 12px;
+  /* REMOVE explicit color - inherit from parent */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* Shadow might be okay */
 }
 
 .aicapture-output-container .output-label {
   font-weight: bold;
-  color: #444;
+  /* REMOVE explicit color - inherit */
   font-size: 11px;
   display: block;
   margin-bottom: 3px;
   margin-top: 5px;
 }
-.aicapture-output-container .output-label:first-of-type {
-    margin-top: 0;
-}
+/* ... */
 
 .aicapture-output-container pre {
-  white-space: pre-wrap;       /* CSS3 */
-  white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
-  white-space: -pre-wrap;      /* Opera 4-6 */
-  white-space: -o-pre-wrap;    /* Opera 7 */
-  word-wrap: break-word;       /* Internet Explorer 5.5+ */
-  background-color: #eee;
-  border: 1px solid #ddd;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  /* REMOVE explicit background-color */
+  /* Adjust border for theme visibility */
+  border: 1px solid rgba(128, 128, 128, 0.2); /* Example: Fainter grey */
   padding: 6px 8px;
-  margin: 0 0 8px 0; /* Margin below each pre */
-  max-height: 150px; /* Limit height */
+  margin: 0 0 8px 0;
+  max-height: 150px;
   overflow-y: auto;
   font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
   font-size: 11px;
-  color: #333;
+  /* REMOVE explicit color - inherit */
   border-radius: 3px;
 }
 
 .aicapture-output-container pre.aicapture-stderr {
-  background-color: #f2dede;
-  color: #a94442;
-  border-color: #ebccd1;
+  /* How to indicate error without specific colors? */
+  /* Option 1: Border only */
+  /* REMOVE background-color */
+  /* REMOVE color */
+  border: 1px solid rgba(255, 0, 0, 0.5); /* Example: Semi-transparent red border */
+  /* Option 2: Use subtle background tint if possible based on theme variables */
+  /* background-color: var(--error-background-subtle, rgba(255,0,0,0.05)); */ /* Needs inspection */
 }
-
-/* @@FILENAME@@ extension/highlight.css */
