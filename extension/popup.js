@@ -1,27 +1,30 @@
 // @@FILENAME@@ extension/popup.js
 document.addEventListener('DOMContentLoaded', async () => {
+    // References to elements
     const serverPortInput = document.getElementById('serverPort');
     const testConnectionBtn = document.getElementById('testConnectionBtn');
     const activationToggle = document.getElementById('activationToggle');
     const lastResponsePre = document.getElementById('last-response');
-
-    // Status display elements
     const serverCwdDisplay = document.getElementById('serverCwdDisplay');
     const serverSaveDirDisplay = document.getElementById('serverSaveDirDisplay');
-    // const serverLogDirDisplay = document.getElementById('serverLogDirDisplay'); // REMOVED
     const serverGitStatusDisplay = document.getElementById('serverGitStatusDisplay');
-    const serverPyRunStatus = document.getElementById('serverPyRunStatus'); // Added for read-only status
-    const serverShRunStatus = document.getElementById('serverShRunStatus'); // Added for read-only status
-
-
-    // REMOVED Server config elements
-    // const serverEnablePython = document.getElementById('serverEnablePython');
-    // const serverEnableShell = document.getElementById('serverEnableShell');
+    const serverPyRunStatus = document.getElementById('serverPyRunStatus');
+    const serverShRunStatus = document.getElementById('serverShRunStatus');
     const restartWarning = document.getElementById('restartWarning');
 
-    const DEFAULT_PORT = 5000; // Keep consistent with background
-    let currentTabId = null; // Store the current tab's ID
+    // Output elements
+    const outputContainer = document.getElementById('output-container');
+    const outputTimestamp = document.getElementById('output-timestamp');
+    const syntaxStdoutPre = document.getElementById('syntax-stdout');
+    const syntaxStderrPre = document.getElementById('syntax-stderr');
+    const runStdoutPre = document.getElementById('run-stdout');
+    const runStderrPre = document.getElementById('run-stderr');
+    const noOutputSpan = '<span class="no-output">(N/A)</span>';
 
+    const DEFAULT_PORT = 5000;
+    let currentTabId = null;
+
+    // Function to display status messages
     function displayStatus(message, type = 'info') {
         lastResponsePre.textContent = message;
         lastResponsePre.className = ''; // Clear previous classes
@@ -29,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log(`Popup Status [${type}]: ${message}`);
     }
 
+    // Function to update server info display area
     function updateServerInfoDisplay(details) {
         const cwd = details.working_directory || 'N/A';
         serverCwdDisplay.textContent = cwd;
@@ -37,16 +41,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         serverSaveDirDisplay.textContent = details.save_directory || 'N/A';
         serverSaveDirDisplay.title = `Fallback save directory (relative to ${cwd})`;
 
-        // serverLogDirDisplay.textContent = details.log_directory || 'N/A'; // REMOVED
-        // serverLogDirDisplay.title = `Log directory (relative to ${cwd})`; // REMOVED
-
-        const isGit = details.is_git_repo === true; // Ensure boolean check
+        const isGit = details.is_git_repo === true;
         serverGitStatusDisplay.textContent = isGit ? 'Yes' : 'No';
         serverGitStatusDisplay.title = isGit ? 'CWD is a Git repository' : 'CWD is not a Git repository';
         serverGitStatusDisplay.classList.toggle('status-true', isGit);
         serverGitStatusDisplay.classList.toggle('status-false', !isGit);
 
-        // Update read-only status spans for auto-run (based on server flags)
         const pyRun = details.auto_run_python === true;
         serverPyRunStatus.textContent = pyRun ? 'Enabled' : 'Disabled';
         serverPyRunStatus.title = pyRun ? 'Enabled (via server flag --enable-python-run)' : 'Disabled';
@@ -56,68 +56,89 @@ document.addEventListener('DOMContentLoaded', async () => {
         const shRun = details.auto_run_shell === true;
         serverShRunStatus.textContent = shRun ? 'Enabled' : 'Disabled';
         serverShRunStatus.title = shRun ? 'Enabled (via server flag --shell)' : 'Disabled';
-        serverShRunStatus.classList.toggle('status-true', shRun); // Maybe use warning class instead?
+        serverShRunStatus.classList.toggle('status-true', shRun);
         serverShRunStatus.classList.toggle('status-false', !shRun);
         if (shRun) serverShRunStatus.classList.add('status-false'); // Use red style for dangerous enabled shell
-
-        // REMOVED logic updating toggle controls
-        // serverEnablePython.checked = details.auto_run_python || false;
-        // serverEnableShell.checked = details.auto_run_shell || false;
-        // serverEnablePython.disabled = false;
-        // serverEnableShell.disabled = false;
     }
 
-     // --- Helper to get current tab ID ---
+     // Function to get current tab ID
      async function getCurrentTabId() {
          try {
              let tabs = await browser.tabs.query({ active: true, currentWindow: true });
              if (tabs && tabs.length > 0 && tabs[0].id) {
                  return tabs[0].id;
              }
-         } catch (error) {
-             console.error("Popup: Error querying for active tab:", error);
-         }
+         } catch (error) { console.error("Popup: Error querying for active tab:", error); }
          console.error("Popup: Could not get current tab ID.");
-         return null; // Indicate failure
+         return null;
      }
 
+    // Function to display the last execution output
+    function displayLastOutput(outputData) {
+        if (outputData) {
+            outputContainer.style.display = 'block'; // Show the container
+            try {
+                const date = new Date(outputData.timestamp);
+                 outputTimestamp.textContent = `Recorded: ${date.toLocaleString()}`;
+            } catch { outputTimestamp.textContent = ''; }
+
+            syntaxStdoutPre.innerHTML = outputData.syntax_stdout?.trim() ? outputData.syntax_stdout : noOutputSpan;
+            syntaxStderrPre.innerHTML = outputData.syntax_stderr?.trim() ? outputData.syntax_stderr : noOutputSpan;
+            runStdoutPre.innerHTML = outputData.run_stdout?.trim() ? outputData.run_stdout : noOutputSpan;
+            runStderrPre.innerHTML = outputData.run_stderr?.trim() ? outputData.run_stderr : noOutputSpan;
+
+            syntaxStderrPre.classList.toggle('stderr', !!outputData.syntax_stderr?.trim());
+            runStderrPre.classList.toggle('stderr', !!outputData.run_stderr?.trim());
+        } else {
+            outputContainer.style.display = 'none';
+            console.log("Popup: No last execution output found for this tab.");
+        }
+    }
 
     // --- Initialization ---
     displayStatus('Loading settings...');
     currentTabId = await getCurrentTabId();
-    // ... (rest of initialization for port and activation state remains the same) ...
+
     if (currentTabId === null) {
-         displayStatus('Error: Could not identify the current tab. Port settings might not work correctly.', 'error');
+         displayStatus('Error: Could not identify the current tab. Settings might not work correctly.', 'error');
     } else {
         console.log(`Popup: Initializing for tab ID: ${currentTabId}`);
+        // Fetch Port
         try {
             const portResponse = await browser.runtime.sendMessage({ action: "getPort", tabId: currentTabId });
-            const initialPort = portResponse?.port || DEFAULT_PORT;
-            serverPortInput.value = initialPort;
-            console.log(`Popup: Initial port for tab ${currentTabId} set to ${initialPort}`);
+            serverPortInput.value = portResponse?.port || DEFAULT_PORT;
         } catch (error) {
             console.error(`Popup: Error getting initial port for tab ${currentTabId}:`, error);
-            serverPortInput.value = DEFAULT_PORT; // Fallback
-            displayStatus(`Error loading port for this tab: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
+            serverPortInput.value = DEFAULT_PORT;
+            displayStatus(`Error loading port: ${error.message}. Using default ${DEFAULT_PORT}.`, 'error');
          }
+
+        // Fetch Activation State
+        try {
+            const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
+            activationToggle.checked = activationResponse?.isActive === true;
+        } catch (error) {
+            console.error("Popup: Error getting initial activation state:", error);
+            activationToggle.checked = false;
+            displayStatus(`Error loading activation state: ${error.message}.`, 'warning');
+         }
+
+         // Fetch Last Output Data
+         try {
+             const outputResponse = await browser.runtime.sendMessage({ action: "getLastOutput", tabId: currentTabId });
+             displayLastOutput(outputResponse?.output);
+         } catch (error) {
+             console.error(`Popup: Error getting last output for tab ${currentTabId}:`, error);
+             displayLastOutput(null);
+         }
+
+        // Attempt initial connection test
+        testConnectionBtn.click();
     }
-     try {
-         const activationResponse = await browser.runtime.sendMessage({ action: "getActivationState" });
-         activationToggle.checked = activationResponse?.isActive === true;
-         console.log(`Popup: Initial global activation state: ${activationToggle.checked}`);
-     } catch (error) {
-        console.error("Popup: Error getting initial activation state:", error);
-        activationToggle.checked = false; // Default to inactive on error
-        displayStatus(`Error loading activation state: ${error.message}.`, 'warning');
-      }
-
-     if (currentTabId !== null) { testConnectionBtn.click(); }
-     else { displayStatus("Cannot perform initial connection test without Tab ID.", "warning"); }
-
 
     // --- Event Listeners ---
 
-    // Port input listener remains the same
+    // Validate and Store Port on Input
     serverPortInput.addEventListener('input', () => {
         if (currentTabId === null) {
             displayStatus('Cannot save port setting - current tab ID unknown.', 'error');
@@ -131,7 +152,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             serverPortInput.classList.remove('invalid');
             isValid = true;
             if (portValue !== '') {
-                 // **Send tabId with the store request**
                  browser.runtime.sendMessage({ action: "storePort", tabId: currentTabId, port: portNumber })
                      .then(response => {
                          if (!response?.success) console.error(`Popup: Failed to store port for tab ${currentTabId}.`);
@@ -142,15 +162,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             serverPortInput.classList.add('invalid');
         }
-        // Show restart warning if port differs from default (simplistic check)
-        // Also check against current value to avoid showing warning unnecessarily if default is typed
-        const currentPortValue = parseInt(serverPortInput.value, 10); // Re-parse
-        restartWarning.style.display = (isValid && portValue !== '' && currentPortValue !== DEFAULT_PORT) ? 'block' : 'none';
+        restartWarning.style.display = (portValue !== '' && portNumber !== DEFAULT_PORT) ? 'block' : 'none';
     });
 
-    // Test Connection listener remains the same
+    // Test Connection Button
     testConnectionBtn.addEventListener('click', async () => {
-        // Tests the *currently entered* port, not necessarily the stored one for the tab
         const currentInputPort = parseInt(serverPortInput.value, 10);
         if (isNaN(currentInputPort) || currentInputPort < 1025 || currentInputPort > 65535) {
             displayStatus('Invalid port number in field. Enter 1025-65535.', 'error');
@@ -158,22 +174,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         serverPortInput.classList.remove('invalid');
-
         displayStatus(`Testing connection to port ${currentInputPort}...`, 'info');
         testConnectionBtn.disabled = true;
 
         try {
-            // Send the current input value to the background script for testing
             const response = await browser.runtime.sendMessage({ action: "testConnection", port: currentInputPort });
-
             if (response && response.success) {
                 displayStatus('Connection successful! Server status loaded.', 'success');
                 updateServerInfoDisplay(response.details);
-                 // Update the input field ONLY if the server reports a DIFFERENT port than tested
-                 // This indicates the user might be testing one port while the server for *this tab* runs elsewhere
                 const serverReportedPort = response.details.port;
                  if (serverReportedPort && serverReportedPort !== currentInputPort) {
-                     // serverPortInput.value = serverReportedPort; // Decide if you want this behavior
                      console.warn(`Popup: Test connection to ${currentInputPort} successful, but server reported running on ${serverReportedPort}.`);
                  } else {
                      console.log(`Popup: Test connection OK to port ${currentInputPort}. Server details:`, response.details);
@@ -181,7 +191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                  let errorMsg = response?.details?.message || `Connection failed to port ${currentInputPort}. Is a server running there?`;
                  displayStatus(errorMsg, 'error');
-                 updateServerInfoDisplay({}); // Clear fields on failure
+                 updateServerInfoDisplay({});
                  console.error(`Popup: Test connection to ${currentInputPort} failed:`, response?.details);
             }
         } catch (error) {
@@ -193,7 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Activation Toggle listener remains the same
+    // Activation Toggle Change (Remains Global)
     activationToggle.addEventListener('change', () => {
         const isActive = activationToggle.checked;
         browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
@@ -204,7 +214,5 @@ document.addEventListener('DOMContentLoaded', async () => {
             .catch(err => console.error("Popup: Error sending storeActivationState message:", err));
             displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
     });
-
-    // REMOVED Event listeners for server config toggles
 
 });

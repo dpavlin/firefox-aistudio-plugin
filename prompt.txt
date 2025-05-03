@@ -11,3 +11,4 @@
 7.  **(Optional) End Marker:** For clarity in our chat, you *may* add a separator line after the *entire* code block, like `--- END OF @@FILENAME@@ path/to/file.ext ---`.
 
 **Why is this important?** An automated tool reads your code blocks. It *strictly* expects the `@@FILENAME@@` marker on the first line to identify the file and removes that line before saving. Any deviation will cause errors.
+

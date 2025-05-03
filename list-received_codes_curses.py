@@ -161,6 +161,7 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
                         # Check if preview should be loaded
                         if 0 < size_bytes < PREVIEW_SIZE_LIMIT:
                             try:
+                                # Use error handling for encoding issues
                                 preview_content = file_path.read_text(encoding='utf-8', errors='replace')
                             except Exception as read_err:
                                 preview_content = f"[Read Error: {read_err}]"
@@ -220,13 +221,29 @@ def curses_selector(stdscr, files_with_paths: list[Path], initial_index: int) ->
 
 def view_file(filepath: Path):
     """Attempts to view the specified file using less."""
-    # (No changes needed in view_file)
-    if not shutil.which("less"): print(f"\nError: 'less' not found: {filepath}", file=sys.stderr); input("Press Enter..."); return
-    if not filepath.is_file(): print(f"\nError: Not a file: {filepath}", file=sys.stderr); input("Press Enter..."); return
+    if not shutil.which("less"):
+        print(f"\nError: 'less' command not found. Cannot view file: {filepath}", file=sys.stderr)
+        input("Press Enter to continue...") # Wait for user ack
+        return
+    if not filepath.is_file():
+        print(f"\nError: Not a file: {filepath}", file=sys.stderr)
+        input("Press Enter to continue...")
+        return
     print(f"\nViewing '{filepath.name}' with less... (Press 'q' to quit less)", file=sys.stderr)
-    try: subprocess.run(["less", str(filepath)], check=False)
-    except Exception as e: print(f"\nError running 'less': {e}", file=sys.stderr); input("Press Enter...")
-    finally: pass
+    try:
+        # Use Popen to manage terminal state better, especially after curses
+        process = subprocess.Popen(["less", str(filepath)])
+        process.wait() # Wait for less to exit
+    except Exception as e:
+        print(f"\nError running 'less': {e}", file=sys.stderr)
+        input("Press Enter to continue...")
+    finally:
+        # Ensure terminal settings are reasonable after less exits
+        # This might not be strictly necessary with Popen, but can help
+        # if curses or less left the terminal in an odd state.
+        # os.system('stty sane') # Can uncomment if terminal issues persist
+        pass
+
 
 # --- Main Execution ---
 def main():
@@ -249,8 +266,9 @@ def main():
     last_selection_index = 0
     while True:
         files = get_files_list(codes_dir)
-        if not files and not codes_dir.exists():
-             print(f"Error: Directory '{codes_dir}' disappeared.", file=sys.stderr); break
+        # Don't exit immediately if dir temporarily disappears during loop
+        # if not files and not codes_dir.exists():
+        #      print(f"Error: Directory '{codes_dir}' disappeared.", file=sys.stderr); break
 
         selected_path = None
         try:
@@ -258,23 +276,38 @@ def main():
                 curses_selector, files, last_selection_index
             )
         except curses.error as e:
+             # Try to clean up curses window before printing error
+             try: curses.endwin()
+             except Exception: pass
              print(f"\nCurses error: {e}\nTerminal might be too small or incompatible.", file=sys.stderr); break
         except Exception as e:
+             try: curses.endwin()
+             except Exception: pass
              print(f"\nError in selector loop: {e}", file=sys.stderr); break
 
         if selected_path is None:
             print("\nExiting.")
             break
         else:
+            # Curses has ended here, safe to print and run subprocess
             view_file(selected_path)
-
+            # After viewing, loop will restart and potentially re-enter curses
 
 if __name__ == "__main__":
-    try: main()
-    except KeyboardInterrupt: print("\nOperation cancelled by user (Ctrl+C).")
-    except Exception as e: print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user (Ctrl+C).")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
     finally:
+        # Ensure curses is ended cleanly, even if main loop crashes
         try:
-             if sys.stdout.isatty(): curses.endwin()
+             # Check if curses was initialized before trying to end it
+             # Checking sys.stdout.isatty() helps but isn't foolproof
+             if '_curses' in sys.modules and sys.stdout.isatty():
+                 curses.endwin()
         except Exception: pass
+        # Maybe restore terminal settings if needed
+        # os.system('stty sane')
         sys.exit(0)

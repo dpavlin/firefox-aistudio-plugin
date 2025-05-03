@@ -5,7 +5,7 @@ import sys
 import threading
 from flask import Flask
 from flask_cors import CORS
-import os # Added for OSError check
+import os # Import os for path manipulation if needed later
 
 # Import configuration and route blueprints
 import config_manager
@@ -74,7 +74,6 @@ if __name__ == '__main__':
 
     try:
         app.run(host=host_ip, port=port_num, debug=False)
-    # ... (exception handling remains the same) ...
     except OSError as e:
         if "Address already in use" in str(e) or ("WinError 10048" in str(e) and os.name == 'nt'):
              print(f"\nE: Port {port_num} is already in use.", file=sys.stderr)
@@ -83,4 +82,3 @@ if __name__ == '__main__':
         else: print(f"\nE: Failed to start server: {e}", file=sys.stderr); sys.exit(1)
     except KeyboardInterrupt: print("\n--- Server shutting down ---", file=sys.stderr); sys.exit(0)
     except Exception as e: print(f"\nE: Unexpected error during startup: {e}", file=sys.stderr); sys.exit(1)
-

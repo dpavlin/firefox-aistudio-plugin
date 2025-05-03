@@ -1,6 +1,6 @@
 # AI Code Capture
 
-Firefox plugin for Google AI Studio integration with local file system
+Firefox plugin for Google AI Studio integration with local file system 
 
 ## Motivation
 
@@ -18,12 +18,10 @@ sudo apt install python3-flask python3-flask-cors
 
 ```bash
 # Navigate to your project's root directory first
-# Auto-run is controlled *only* by flags now
 python3 server.py [--port <port_number>] [--shell] [--enable-python-run]
 ```
-*   Default port is 5000.
-*   `--shell`: DANGEROUS! Enables automatic execution of received Shell scripts.
-*   `--enable-python-run`: Enables automatic execution of received Python scripts.
+*Default port is 5000.*
+*Auto-run for Python (`--enable-python-run`) and Shell (`--shell` - DANGEROUS!) are now controlled *only* by these command-line flags.*
 
 ## Load Temporary Add-on in Firefox
 
@@ -45,7 +43,7 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 ## Google AI Studio Prompt Instructions
 
-**Crucial:** Instruct the AI how to format its output. Use the content of `prompt.txt` in your prompt.
+**Crucial:** Instruct the AI how to format its output. Use the contents of `prompt.txt` in your instructions.
 
 ## Git Integration
 
@@ -56,3 +54,9 @@ zip /tmp/firefox-aistudio-plugin.zip $(git ls-files)
 
 *   Use the server's `--port <number>` option to run multiple instances on different ports for different projects.
 *   Configure the matching port number in the extension popup for each corresponding AI Studio tab. The port setting is now tab-specific.
+
+## Script Execution Output
+
+*   If Python or Shell auto-run is enabled via server flags, the stdout and stderr from script syntax checks and execution are no longer saved to log files.
+*   This output is returned in the server's JSON response and stored by the extension.
+*   You can view the output from the *last executed script in the current tab* by opening the extension popup.
