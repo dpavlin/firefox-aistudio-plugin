@@ -1,8 +1,8 @@
+// @@FILENAME@@ extension/background.js
 // Default server port
 const DEFAULT_PORT = 5000;
 const STORAGE_TAB_PORTS_KEY = 'tabServerPorts'; // Key for the object storing ports per tab
 const STORAGE_BLOCK_STATUS_KEY = 'tabBlockStatuses'; // Key for object storing block statuses per tab {tabId: {hash: status}}
-// const STORAGE_LAST_OUTPUT_KEY = 'tabLastOutputs'; // REMOVED
 const STORAGE_ACTIVE_KEY = 'extensionActive';
 
 // --- Helper Functions ---
@@ -264,49 +264,11 @@ browser.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
            return Promise.resolve({ success: false, details: { status: 'error', message: error.message || 'Connection failed' } });
       }
   }
-   else if (request.action === "updateConfig") {
-        // NOTE: This action is no longer triggered by the current popup UI for auto-run,
-        // but keeping handler structure in case port setting via this route is desired later.
-        if (typeof senderTabId !== 'number') {
-            console.error("Background: Cannot update config - sender tab ID missing.");
-            return Promise.resolve({ success: false, details: { message: 'Missing sender tab ID.' } });
-        }
-       try {
-            const port = await getPortForTab(senderTabId);
-            const url = `http://127.0.0.1:${port}/update_config`;
-            const settingsToSend = {};
-            // Only handle 'port' if sent via this message in the future
-            if (request.settings && request.settings.hasOwnProperty('port')) {
-                 settingsToSend.port = request.settings.port;
-            }
-
-             if (Object.keys(settingsToSend).length === 0) {
-                 console.log("Background: No relevant settings found in updateConfig request.");
-                 return Promise.resolve({ success: true, details: { message: "No applicable settings to update.", status: "info"} });
-             }
-
-            console.log(`Background: Sending config update for tab ${senderTabId} to ${url}`, settingsToSend);
-            const response = await fetch(url, {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                 body: JSON.stringify(settingsToSend)
-            });
-             if (!response.ok) {
-                 const errorText = await response.text().catch(() => `Server returned status ${response.status}`);
-                 throw new Error(`Server error updating config: ${response.status} ${response.statusText}. Response: ${errorText}`);
-             }
-             const data = await response.json();
-             console.log("Background: Config update response:", data);
-             return Promise.resolve({ success: data.status === 'success', details: data });
-         } catch (error) {
-             console.error("Background: Update config failed:", error);
-              const portForError = await getPortForTab(senderTabId);
-             return Promise.resolve({ success: false, details: { status: 'error', message: error.message || `Update failed for server on port ${portForError}` } });
-         }
-   }
+   // REMOVED "updateConfig" handler
 
   // Default fallback
   console.warn(`Background: Unhandled message action: ${request.action}`);
+  // Return a consistent promise structure even for unhandled actions
   return Promise.resolve({ success: false, details: { message: `Unhandled action: ${request.action}` }});
 
 });
@@ -336,4 +298,4 @@ browser.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 });
 
 
-console.log("AI Code Capture: Background script loaded (Tab-local ports/status. No output storage)."); // Updated log
+console.log("AI Code Capture: Background script loaded (Tab-local ports/status. No UI config)."); // Updated log

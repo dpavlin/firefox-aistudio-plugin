@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# @@FILENAME@@ list-received_codes_curses.py
 
 # list-received_codes_curses.py: Interactive viewer using Python curses.
 # Shows filename, size, mod time (YYYY-MM-DD HH:MM:SS, newest first).

@@ -1,3 +1,4 @@
+// @@FILENAME@@ extension/popup.js
 document.addEventListener('DOMContentLoaded', async () => {
     // References to controls and status display
     const serverPortInput = document.getElementById('serverPort');
@@ -13,7 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const serverPyRunStatus = document.getElementById('serverPyRunStatus');
     const serverShRunStatus = document.getElementById('serverShRunStatus');
 
-    // REMOVED Output elements references
+    // REMOVED Output elements
 
     const DEFAULT_PORT = 5000;
     let currentTabId = null;
@@ -42,7 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const pyRun = details.auto_run_python === true;
         serverPyRunStatus.textContent = pyRun ? 'Enabled' : 'Disabled';
-        serverPyRunStatus.title = pyRun ? 'Enabled (via server flag --enable-python-run)' : 'Disabled';
+        serverPyRunStatus.title = pyRun ? 'Enabled (via server flag --python)' : 'Disabled'; // Updated flag name
         serverPyRunStatus.classList.toggle('status-true', pyRun);
         serverPyRunStatus.classList.toggle('status-false', !pyRun);
 
@@ -122,7 +123,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             serverPortInput.classList.add('invalid');
         }
         restartWarning.style.display = (portValue !== '' && portNumber !== DEFAULT_PORT) ? 'block' : 'none';
-     });
+    });
 
     // Test Connection listener remains the same
     testConnectionBtn.addEventListener('click', async () => {
@@ -133,46 +134,48 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         serverPortInput.classList.remove('invalid');
+
         displayStatus(`Testing connection to port ${currentInputPort}...`, 'info');
         testConnectionBtn.disabled = true;
+
         try {
             const response = await browser.runtime.sendMessage({ action: "testConnection", port: currentInputPort });
              if (response && response.success) {
                  displayStatus('Connection successful! Server status loaded.', 'success');
-                 updateServerInfoDisplay(response.details);
+                 updateServerInfoDisplay(response.details); // This populates server info section
                  const serverReportedPort = response.details.port;
-                 if (serverReportedPort && serverReportedPort !== currentInputPort) {
-                     console.warn(`Popup: Test connection to ${currentInputPort} successful, but server reported running on ${serverReportedPort}.`);
-                 } else {
-                     console.log(`Popup: Test connection OK to port ${currentInputPort}. Server details:`, response.details);
-                 }
+                  if (serverReportedPort && serverReportedPort !== currentInputPort) {
+                      console.warn(`Popup: Test connection to ${currentInputPort} successful, but server reported running on ${serverReportedPort}.`);
+                  } else {
+                      console.log(`Popup: Test connection OK to port ${currentInputPort}. Server details:`, response.details);
+                  }
              } else {
                  let errorMsg = response?.details?.message || `Connection failed to port ${currentInputPort}. Is a server running there?`;
                  displayStatus(errorMsg, 'error');
-                 updateServerInfoDisplay({});
+                 updateServerInfoDisplay({}); // Clear server info on failure
                  console.error(`Popup: Test connection to ${currentInputPort} failed:`, response?.details);
              }
-         } catch (error) {
-             displayStatus(`Error testing connection: ${error.message}`, 'error');
-             updateServerInfoDisplay({});
-             console.error("Popup: Error sending testConnection message:", error);
-         } finally {
-             testConnectionBtn.disabled = false;
-         }
-     });
+        } catch (error) {
+            displayStatus(`Error testing connection: ${error.message}`, 'error');
+            updateServerInfoDisplay({});
+            console.error("Popup: Error sending testConnection message:", error);
+        } finally {
+            testConnectionBtn.disabled = false;
+        }
+    });
 
     // Activation Toggle listener remains the same
     activationToggle.addEventListener('change', () => {
-         const isActive = activationToggle.checked;
-         browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
-             .then(response => {
-                 if (!response?.success) console.error("Popup: Failed to store activation state.");
-                 else console.log(`Popup: Global activation state stored: ${isActive}`);
-             })
-             .catch(err => console.error("Popup: Error sending storeActivationState message:", err));
-             displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
+        const isActive = activationToggle.checked;
+        browser.runtime.sendMessage({ action: "storeActivationState", isActive: isActive })
+            .then(response => {
+                if (!response?.success) console.error("Popup: Failed to store activation state.");
+                else console.log(`Popup: Global activation state stored: ${isActive}`);
+            })
+            .catch(err => console.error("Popup: Error sending storeActivationState message:", err));
+            displayStatus(`Extension ${isActive ? 'activated' : 'deactivated'} globally.`, 'info');
      });
 
-    // No listeners for auto-run toggles anymore
+    // REMOVED Event listeners for server config toggles
 
 });
