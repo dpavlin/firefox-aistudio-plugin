@@ -60,8 +60,30 @@ def is_git_tracked(filepath_relative_to_repo: str, server_dir: Path, is_repo: bo
          print(f"E: Error checking Git tracking status for '{filepath_relative_to_repo}': {e}", file=sys.stderr)
          return False # Error occurred
 
+def _check_last_commit_for_amend(git_path_relative: str, server_dir: Path) -> bool:
+    """Checks if the last commit modified ONLY the specified file."""
+    try:
+        cmd = ['git', 'log', '-1', '--name-only', '--pretty=format:']
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', cwd=server_dir, check=False, timeout=5)
+        if result.returncode != 0:
+            print(f"Info: Could not get last commit info (maybe first commit?), not amending. (RC={result.returncode})", file=sys.stderr)
+            if result.stderr: print(f"   Git stderr: {result.stderr.strip()}", file=sys.stderr)
+            return False
+
+        changed_files = [line for line in result.stdout.strip().splitlines() if line] # Get non-empty lines
+        if len(changed_files) == 1 and changed_files[0] == git_path_relative:
+            print(f"Info: Last commit only changed '{git_path_relative}'. Will attempt amend.", file=sys.stderr)
+            return True
+        else:
+            print(f"Info: Last commit changed {len(changed_files)} files ({changed_files[:3]}...). Not amending.", file=sys.stderr)
+            return False
+    except (subprocess.TimeoutExpired, Exception) as e:
+        print(f"E: Error checking last commit for amend: {e}", file=sys.stderr)
+        return False
+
+
 def update_and_commit_file(filepath_absolute: Path, code_content: str, marker_filename: str, server_dir: Path, is_repo: bool) -> bool:
-    """Writes content to an existing tracked file, stages, and commits if tracked and changed."""
+    """Writes content to an existing tracked file, stages, and commits (potentially amending)."""
     if not is_repo:
         print("W: Attempted Git commit, but not in a repo.", file=sys.stderr)
         return False
@@ -79,28 +101,28 @@ def update_and_commit_file(filepath_absolute: Path, code_content: str, marker_fi
 
         # Check for changes first to avoid empty commits
         current_content = ""
+        needs_save = True # Assume we need to save unless content is identical
         if filepath_absolute.exists():
              try:
                  # Read existing file, also ensuring it ends with a newline for fair comparison
                  current_content = filepath_absolute.read_text(encoding='utf-8')
                  if not current_content.endswith('\n'):
                      current_content += '\n'
+                 if code_content == current_content:
+                      print(f"Info: Content for '{git_path_relative}' identical. Skipping save and Git commit.", file=sys.stderr)
+                      needs_save = False # No need to save or commit
+                      return True # Nothing to do, operation is effectively successful
              except Exception as read_e:
-                 print(f"W: Could not read existing file {git_path_relative} to check changes: {read_e}", file=sys.stderr)
-                 # Proceed assuming changes if read fails? Or return False? For now, proceed.
+                 print(f"W: Could not read existing file {git_path_relative} to check changes: {read_e}. Proceeding with save/commit.", file=sys.stderr)
+                 # Proceed assuming changes if read fails
 
-        if code_content == current_content:
-             print(f"Info: Content for '{git_path_relative}' identical. Skipping Git commit.", file=sys.stderr)
-             # We still need to save, as save_code_to_file might not have been called yet
-             if not save_code_to_file(code_content, filepath_absolute):
-                 return False # Basic save failed
-             return True # No commit needed, but save was successful or unnecessary
+        # --- Save the file (only if needed) ---
+        if needs_save:
+            print(f"Info: Overwriting tracked local file: {git_path_relative}", file=sys.stderr)
+            if not save_code_to_file(code_content, filepath_absolute):
+                return False # Basic save failed before attempting Git
 
-        # Write and commit
-        print(f"Info: Overwriting tracked local file: {git_path_relative}", file=sys.stderr)
-        if not save_code_to_file(code_content, filepath_absolute):
-            return False # Basic save failed before attempting Git
-
+        # --- Git Add ---
         print(f"Running: git add '{git_path_relative}' from {server_dir}", file=sys.stderr)
         add_result = subprocess.run(['git', 'add', git_path_relative], capture_output=True, text=True, check=False, encoding='utf-8', cwd=server_dir, timeout=10)
         if add_result.returncode != 0:
@@ -108,25 +130,52 @@ def update_and_commit_file(filepath_absolute: Path, code_content: str, marker_fi
             # Consider attempting to reset the file if add fails?
             return False
 
-        # Use the marker filename (which might be more user-friendly than the full relative path)
-        commit_message = f"Update {marker_filename} from AI Code Capture"
-        print(f"Running: git commit -m \"{commit_message}\" -- '{git_path_relative}' ...", file=sys.stderr)
-        # Pass '--' to ensure filename isn't misinterpreted as an option
-        commit_result = subprocess.run(['git', 'commit', '-m', commit_message, '--', git_path_relative], capture_output=True, text=True, check=False, encoding='utf-8', cwd=server_dir, timeout=15)
+        # --- Determine if amending ---
+        should_amend = _check_last_commit_for_amend(git_path_relative, server_dir)
+
+        # --- Git Commit (potentially amend) ---
+        commit_command = ['git', 'commit']
+        commit_action_log = "" # For logging
+
+        if should_amend:
+            # Use --amend and --no-edit to reuse the previous commit message
+            commit_command.extend(['--amend', '--no-edit'])
+            commit_action_log = f"Amending previous commit for '{git_path_relative}'..."
+        else:
+            # Create a new commit with a standard message
+            commit_message = f"Update {marker_filename} from AI Code Capture"
+            commit_command.extend(['-m', commit_message])
+            commit_action_log = f"Creating new commit for '{git_path_relative}' with msg \"{commit_message}\"..."
+
+        # Always add the file path using '--' to ensure it's treated as a path
+        commit_command.extend(['--', git_path_relative])
+
+        print(f"Running: {' '.join(commit_command)}", file=sys.stderr)
+        print(f"Action: {commit_action_log}", file=sys.stderr)
+
+        commit_result = subprocess.run(commit_command, capture_output=True, text=True, check=False, encoding='utf-8', cwd=server_dir, timeout=15)
 
         if commit_result.returncode == 0:
-            print(f"Success: Committed changes for '{git_path_relative}'.\n{commit_result.stdout.strip()}", file=sys.stderr)
+            action_verb = "Amended" if should_amend else "Committed"
+            print(f"Success: {action_verb} changes for '{git_path_relative}'.\n{commit_result.stdout.strip()}", file=sys.stderr)
             return True
         else:
              # Check common non-error messages from commit output
              no_changes_patterns = ["nothing to commit", "no changes added to commit", "nothing added to commit but untracked files present"]
+             # Special check for amend when nothing changed since previous commit
+             if should_amend and "no changes" in (commit_result.stdout + commit_result.stderr).lower() and "amend" in (commit_result.stdout + commit_result.stderr).lower():
+                  print(f"Info: 'git commit --amend' reported no new changes staged for '{git_path_relative}' since last commit.", file=sys.stderr)
+                  return True # Treat as success if amend resulted in no effective change
+
              combined_output = (commit_result.stdout + commit_result.stderr).lower()
              if any(p in combined_output for p in no_changes_patterns):
                  print(f"Info: 'git commit' reported no effective changes staged for '{git_path_relative}'.", file=sys.stderr)
                  return True # Treat as success if git says nothing changed
-             else:
-                 print(f"E: 'git commit' failed for '{git_path_relative}' (RC={commit_result.returncode}):\n{commit_result.stderr.strip()}\n{commit_result.stdout.strip()}", file=sys.stderr)
-                 return False
+
+             # Actual error
+             print(f"E: 'git commit {'--amend' if should_amend else ''}' failed for '{git_path_relative}' (RC={commit_result.returncode}):\n{commit_result.stderr.strip()}\n{commit_result.stdout.strip()}", file=sys.stderr)
+             return False
     except Exception as e:
         print(f"E: Unexpected error during Git update/commit for {filepath_absolute}: {e}", file=sys.stderr)
         return False
+# @@FILENAME@@ file_handler.py
